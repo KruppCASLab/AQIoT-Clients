@@ -10,26 +10,153 @@ import adafruit_requests
 from digitalio import DigitalInOut, Direction, Pull
 from adafruit_pm25.uart import PM25_UART
 import ipaddress
- 
+import digitalio
+    
+# Defines led for testing
+led = digitalio.DigitalInOut(board.LED)
+led.direction = digitalio.Direction.OUTPUT
 
-wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
-pool = socketpool.SocketPool(wifi.radio)
+def check_if_running():
+    """
+    Will blink on and off continuously for 2 seconds after the initial handling functions are successful and then at
+    the end of each response from the server after posting the json
+    
+    This will allow us to see whether the code is running properly from the pico's led alone
+    """
+    times = 0
+    while times < 5:
+        led.value = True
+        time.sleep(0.2)
+        led.value = False
+        time.sleep(0.2)
+        times += 1
+
+def handle_wifi_connection(max_attempts = 5, delay = 1):
+    """
+    Connect to WiFi Network using the SSID and password retrieved from setting.toml.
+    """
+    attempts = 0
+    
+    while attempts < max_attempts:
+        try:
+            wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
+            break # Break of the loop if connection is successful
+        except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError, KeyError, FileNotFoundError) as e:
+            print(type(e).__name__, ":", str(e))
+            print("Potential human error")
+            wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
+            break # Break of the loop if connection is successful
+        except Exception as e:
+            print("Caught", type(e).__name__, ":", str(e))
+            print("Retrying connection, Attempt:", str(attempts + 1))
+            attempts += 1
+            time.sleep(delay)
+    else:
+        print("Failed to Connect to WiFi")
+        
+def handle_socketpool(max_attempts = 5, delay = 1):
+    """
+    Creates a socket pool for managing sockets using the provided WiFi radio object.
+    """
+    global pool
+    attempts = 0
+    
+    while attempts < max_attempts:
+        try:
+            pool = socketpool.SocketPool(wifi.radio)
+            break # Break of the loop if initialization is successful
+        except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError) as e:
+            print(type(e).__name__, ":", str(e))
+            print("Potential human error")
+            pool = socketpool.SocketPool(wifi.radio)
+            break # Break of the loop if connection is successful
+        except Exception as e:
+            print("Caught", type(e).__name__, ":", str(e))
+            print("Retrying Pool Creation, Attempt:", str(attempts + 1))
+            attempts += 1
+            time.sleep(delay)
+    else:
+        print("Failed Pool Creation")
+        
+def handle_requests_session(max_attempts = 5, delay = 1):
+    """
+    Create an Adafruit Requests session with the provided socket pool and SSL context.
+    """
+    global requests
+    attempts = 0
+    
+    while attempts < max_attempts:
+        try:
+            requests = adafruit_requests.Session(pool, ssl.create_default_context())
+            break # Break of the loop if initialization is successful
+        except (AttributeError, ValueError, TypeError, RuntimeError) as e:
+            print(type(e).__name__, ":", str(e))
+            print("Potential human error")
+            requests = adafruit_requests.Session(pool, ssl.create_default_context())
+            break # Break of the loop if connection is successful
+        except NameError as e:
+            print("NameError:", str(e))
+            handle_socketpool()
+        except Exception as e:
+            print("Caught", type(e).__name__, ":", str(e))
+            print("Retrying Session Creation, Attempt:", str(attempts + 1))
+            attempts += 1
+            time.sleep(delay)
+    else:
+        print("Failed Session Creation")
+
+def handle_uart():
+    """
+    Create UART object by defining the pins and baudrate and handles possible exceptions.
+    """
+    global uart
+    
+    try:
+        uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
+    except Exception as e:
+        print("Caught", type(e).__name__, ":", str(e))
+        uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
+
+def handle_pm25():
+    """
+    Initialize the PM2.5 sensor connected via UART and handles possible exceptions.
+    """
+    global pm25
+    
+    try:
+        pm25 = PM25_UART(uart, reset_pin)
+    except NameError as e:
+        print("NameError:", str(e))
+        handle_uart()
+    except Exception as e:
+        print("Caught", type(e).__name__, ":", str(e))
+        pm25 = PM25_UART(uart, reset_pin)
+
+handle_wifi_connection()
+handle_socketpool()
 print("connected to wifi")
-requests = adafruit_requests.Session(pool, ssl.create_default_context())
+handle_requests_session()
 #adafruit_requests.request(method: "post", url: "", json_data, float = 60)adafruit_requests.Session(pool, ssl.create_default_context())
 
 reset_pin = None
-uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
-pm25 = PM25_UART(uart, reset_pin)
+handle_uart()
+handle_pm25()
 
 #  prints MAC address to REPL
-print("My MAC addr:", [hex(i) for i in wifi.radio.mac_address])
+try:
+    print("My MAC addr:", [hex(i) for i in wifi.radio.mac_address])
+except Exception as e:
+    print("Error printing MAC address:", str(e))
 
 #  prints IP address to REPL
-print("My IP address is", wifi.radio.ipv4_address)
-
+try:
+    print("My IP address is", wifi.radio.ipv4_address)
+except Exception as e:
+    print("Error printing IP address:", str(e))
 
 print("Found PM2.5 sensor, reading data...")
+
+check_if_running()
 
 while True:
     time.sleep(1)
@@ -37,46 +164,64 @@ while True:
     try:
         print("Attempting pm25 read again...")
         aqdata = pm25.read()
-
+    except NameError as e:
+        print("NameError:", str(e))
+        handle_pm25()
     except Exception as e:
-        print("Exception" + str(e) + ": retrying...")
+        print("Exception: " + str(e) + ": retrying...")
         continue
 
     print()
     print("Concentration Units (standard)")
     print("---------------------------------------")
-    print(
-        "PM 1.0: %d\tPM2.5: %d\tPM10: %d"
-        % (aqdata["pm10 standard"], aqdata["pm25 standard"], aqdata["pm100 standard"])
-    )
+    try:
+        print(
+            "PM 1.0: %d\tPM2.5: %d\tPM10: %d"
+            % (aqdata["pm10 standard"], aqdata["pm25 standard"], aqdata["pm100 standard"])
+        )
+    except Exception as e:
+        print("Failed to print Standard Concentration Units")
     print("Concentration Units (environmental)")
     print("---------------------------------------")
-    print(
-        "PM 1.0: %d\tPM2.5: %d\tPM10: %d"
-        % (aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"])
-    )
+    try:
+        print(
+            "PM 1.0: %d\tPM2.5: %d\tPM10: %d"
+            % (aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"])
+        )
+    except Exception as e:
+        print("Failed to print Environmental Concentration Units")
     print("---------------------------------------")
-    print("Particles > 0.3um / 0.1L air:", aqdata["particles 03um"])
-    print("Particles > 0.5um / 0.1L air:", aqdata["particles 05um"])
-    print("Particles > 1.0um / 0.1L air:", aqdata["particles 10um"])
-    print("Particles > 2.5um / 0.1L air:", aqdata["particles 25um"])
-    print("Particles > 5.0um / 0.1L air:", aqdata["particles 50um"])
-    print("Particles > 10 um / 0.1L air:", aqdata["particles 100um"])
+    try:
+        print("Particles > 0.3um / 0.1L air:", aqdata["particles 03um"])
+        print("Particles > 0.5um / 0.1L air:", aqdata["particles 05um"])
+        print("Particles > 1.0um / 0.1L air:", aqdata["particles 10um"])
+        print("Particles > 2.5um / 0.1L air:", aqdata["particles 25um"])
+        print("Particles > 5.0um / 0.1L air:", aqdata["particles 50um"])
+        print("Particles > 10 um / 0.1L air:", aqdata["particles 100um"])
+    except Exception as e:
+        print("Failed to print Particle Amounts")
     print("---------------------------------------")
 
-    try:
-        time.sleep(1)
-        json_data = {"sensor_id" : 11,
-                     "pm25": aqdata["pm25 env"],
-                     "pm1" : aqdata["pm10 env"],
-                     "pm10": aqdata["pm100 env"]
-                     }
-        print("trying to send JSON post request")
-        r = requests.post('https://mopsdev.bw.edu/~bkrupp/aq/postreading.php', json=json_data)
-        if (int(r.status_code) != 200):
-            print("Error - Response from server: ", r.status_code, r.text)
-        else:
-            print("Success - Response from server: ", r.status_code, r.text)
-    except Exception:
-        print("Unable to send data to server, will attempt on next reading")
+    attempts = 0
+    
+    while attempts < 5:
+        try:
+            time.sleep(1)
+            json_data = {"sensor_id" : 13,
+                         "pm25": aqdata["pm25 env"],
+                         "pm1" : aqdata["pm10 env"],
+                         "pm10": aqdata["pm100 env"]
+                         }
+            print("trying to send JSON post request")
+            r = requests.post('https://mopsdev.bw.edu/~bkrupp/aq/postreading.php', json=json_data)   
+            if (int(r.status_code) != 200):
+                print("Error - Response from server: ", r.status_code, r.text)
+            else:
+                print("Success - Response from server: ", r.status_code, r.text)
+            check_if_running()
+            break # Break of the loop if connection is successful
+        except Exception as e:
+            print("Unable to send data to server, will attempt on next reading. Error:",str(e))
+            attempts += 1
+            time.sleep(3)
     time.sleep(60)
