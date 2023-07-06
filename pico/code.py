@@ -11,6 +11,25 @@ from digitalio import DigitalInOut, Direction, Pull
 from adafruit_pm25.uart import PM25_UART
 import ipaddress
 import digitalio
+import sys
+
+def report_config_error(type):
+    print(type, "configuration missing from toml configuration file, please make sure these are configured first.")
+    sys.exit(1)
+
+# Get configuration variables from settings.toml file
+wifi_ssid = os.getenv("WIFI_SSID")
+wifi_pass = os.getenv("WIFI_PASSWORD")
+
+client_id = os.getenv("CLIENT_ID")
+client_key = os.getenv("CLIENT_KEY")
+
+if wifi_ssid == None or wifi_pass == None:
+    report_config_error("WiFi")
+elif client_id == None or client_key == None:
+    report_config_error("Client")
+    
+print("Connecting to", wifi_ssid, wifi_pass)
     
 # Defines led for testing
 led = digitalio.DigitalInOut(board.LED)
@@ -41,10 +60,10 @@ def handle_wifi_connection(max_attempts = 5, delay = 1):
         try:
             wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
             break # Break of the loop if connection is successful
-        except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError, KeyError, FileNotFoundError) as e:
+        except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError, KeyError) as e:
             print(type(e).__name__, ":", str(e))
             print("Potential human error")
-            wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
+            wifi.radio.connect(os.getenv("WIFI_SSID"), os.getenv("WIFI_PASSWORD"))
             break # Break of the loop if connection is successful
         except Exception as e:
             print("Caught", type(e).__name__, ":", str(e))
@@ -225,3 +244,4 @@ while True:
             attempts += 1
             time.sleep(3)
     time.sleep(60)
+
