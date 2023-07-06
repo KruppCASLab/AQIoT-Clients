@@ -29,8 +29,8 @@ if wifi_ssid == None or wifi_pass == None:
 elif client_id == None or client_key == None:
     report_config_error("Client")
     
-print("Connecting to", wifi_ssid, wifi_pass)
-    
+print("Sensor Client Id:", client_id)
+
 # Defines led for testing
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
@@ -54,16 +54,16 @@ def handle_wifi_connection(max_attempts = 5, delay = 1):
     """
     Connect to WiFi Network using the SSID and password retrieved from setting.toml.
     """
+    print("Attempting to Connect to SSID:", wifi_ssid)
     attempts = 0
     
     while attempts < max_attempts:
         try:
-            wifi.radio.connect(os.getenv("CIRCUITPY_WIFI_SSID"), os.getenv("CIRCUITPY_WIFI_PASSWORD"))
+            wifi.radio.connect(wifi_ssid, wifi_pass)
             break # Break of the loop if connection is successful
         except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError, KeyError) as e:
             print(type(e).__name__, ":", str(e))
-            print("Potential human error")
-            wifi.radio.connect(os.getenv("WIFI_SSID"), os.getenv("WIFI_PASSWORD"))
+            report_config_error("Client Misconfig")
             break # Break of the loop if connection is successful
         except Exception as e:
             print("Caught", type(e).__name__, ":", str(e))
@@ -153,7 +153,7 @@ def handle_pm25():
 
 handle_wifi_connection()
 handle_socketpool()
-print("connected to wifi")
+print("Connection to WiFi", wifi_ssid, "Success!")
 handle_requests_session()
 #adafruit_requests.request(method: "post", url: "", json_data, float = 60)adafruit_requests.Session(pool, ssl.create_default_context())
 
@@ -226,7 +226,7 @@ while True:
     while attempts < 5:
         try:
             time.sleep(1)
-            json_data = {"sensor_id" : 13,
+            json_data = {"sensor_id" : client_id,
                          "pm25": aqdata["pm25 env"],
                          "pm1" : aqdata["pm10 env"],
                          "pm10": aqdata["pm100 env"]
