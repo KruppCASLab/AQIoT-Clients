@@ -150,6 +150,30 @@ def handle_pm25():
     except Exception as e:
         print("Caught", type(e).__name__, ":", str(e))
         pm25 = PM25_UART(uart, reset_pin)
+        
+def reset_wifi_and_sensor():
+    # Reinitialize settings.toml variables
+    wifi_ssid = os.getenv("WIFI_SSID")
+    wifi_pass = os.getenv("WIFI_PASSWORD")
+
+    client_id = os.getenv("CLIENT_ID")
+    client_key = os.getenv("CLIENT_KEY")
+
+    if wifi_ssid == None or wifi_pass == None:
+        report_config_error("WiFi")
+    elif client_id == None or client_key == None:
+        report_config_error("Client")
+        
+    # Recall all handling functions
+    handle_wifi_connection()
+    handle_socketpool()
+    handle_requests_session()
+    handle_uart()
+    handle_pm25()
+    
+    print("Finished reinitialization variables and recalling functions")
+    
+    time.sleep(2)
 
 handle_wifi_connection()
 handle_socketpool()
@@ -160,6 +184,12 @@ handle_requests_session()
 reset_pin = None
 handle_uart()
 handle_pm25()
+
+# API Key and headers
+headers = {
+    "Content-Type": "application/json",
+    "x-api-key": "P17MG7Z-MVVM4E6-QJ6JK9Z-9R5HHB4"
+}
 
 #  prints MAC address to REPL
 try:
@@ -232,7 +262,8 @@ while True:
                          "pm10": aqdata["pm100 env"]
                          }
             print("trying to send JSON post request")
-            r = requests.post('https://mopsdev.bw.edu/~bkrupp/aq/postreading.php', json=json_data)   
+            #r = requests.post('https://mopsdev.bw.edu/~bkrupp/aq/postreading.php', json=json_data)
+            r = requests.post('https://mopsdev.bw.edu/aqiot/api/sensor/2/data', json=json_data, headers=headers)
             if (int(r.status_code) != 200):
                 print("Error - Response from server: ", r.status_code, r.text)
             else:
@@ -241,7 +272,9 @@ while True:
             break # Break of the loop if connection is successful
         except Exception as e:
             print("Unable to send data to server, will attempt on next reading. Error:",str(e))
+            if attempts == 4:
+                print("Reached 5 attempts, resetting wifi and sensor variables")
+                reset_wifi_and_sensor()
             attempts += 1
             time.sleep(3)
     time.sleep(60)
-
