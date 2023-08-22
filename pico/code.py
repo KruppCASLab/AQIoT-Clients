@@ -14,22 +14,20 @@ import digitalio
 import sys
 
 def report_config_error(type):
-    print(type, "configuration missing from toml configuration file, please make sure these are configured first.")
+    print(type, "Configuration missing from toml configuration file, please make sure these are configured first.")
     sys.exit(1)
 
 # Get configuration variables from settings.toml file
 wifi_ssid = os.getenv("WIFI_SSID")
 wifi_pass = os.getenv("WIFI_PASSWORD")
 
-client_id = os.getenv("CLIENT_ID")
+endpoint_url = os.getenv("ENDPOINT_URL")
 client_key = os.getenv("CLIENT_KEY")
 
 if wifi_ssid == None or wifi_pass == None:
     report_config_error("WiFi")
-elif client_id == None or client_key == None:
+elif endpoint_url == None or client_key == None:
     report_config_error("Client")
-    
-print("Sensor Client Id:", client_id)
 
 # Defines led for testing
 led = digitalio.DigitalInOut(board.LED)
@@ -124,6 +122,9 @@ def handle_requests_session(max_attempts = 5, delay = 1):
     else:
         print("Failed Session Creation")
 
+# Set uart to None initially, otherwise is would get a name error when trying 'if uart'
+uart = None
+
 def handle_uart():
     """
     Create UART object by defining the pins and baudrate and handles possible exceptions.
@@ -134,7 +135,9 @@ def handle_uart():
         uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
     except Exception as e:
         print("Caught", type(e).__name__, ":", str(e))
-        uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
+        
+# Set pm25 to None initially, otherwise is would get a name error when trying 'if pm25'
+pm25 = None
 
 def handle_pm25():
     """
@@ -151,19 +154,7 @@ def handle_pm25():
         print("Caught", type(e).__name__, ":", str(e))
         pm25 = PM25_UART(uart, reset_pin)
         
-def reset_wifi_and_sensor():
-    # Reinitialize settings.toml variables
-    wifi_ssid = os.getenv("WIFI_SSID")
-    wifi_pass = os.getenv("WIFI_PASSWORD")
-
-    client_id = os.getenv("CLIENT_ID")
-    client_key = os.getenv("CLIENT_KEY")
-
-    if wifi_ssid == None or wifi_pass == None:
-        report_config_error("WiFi")
-    elif client_id == None or client_key == None:
-        report_config_error("Client")
-        
+def reset_wifi_and_sensor():        
     # Recall all handling functions
     handle_wifi_connection()
     handle_socketpool()
@@ -188,7 +179,7 @@ handle_pm25()
 # API Key and headers
 headers = {
     "Content-Type": "application/json",
-    "x-api-key": "P17MG7Z-MVVM4E6-QJ6JK9Z-9R5HHB4"
+    "x-api-key": client_key
 }
 
 #  prints MAC address to REPL
@@ -256,14 +247,13 @@ while True:
     while attempts < 5:
         try:
             time.sleep(1)
-            json_data = {"sensor_id" : client_id,
-                         "pm25": aqdata["pm25 env"],
+            json_data = {"pm25": aqdata["pm25 env"],
                          "pm1" : aqdata["pm10 env"],
                          "pm10": aqdata["pm100 env"]
                          }
             print("trying to send JSON post request")
             #r = requests.post('https://mopsdev.bw.edu/~bkrupp/aq/postreading.php', json=json_data)
-            r = requests.post('https://mopsdev.bw.edu/aqiot/api/sensor/2/data', json=json_data, headers=headers)
+            r = requests.post(endpoint_url, json=json_data, headers=headers)
             if (int(r.status_code) != 200):
                 print("Error - Response from server: ", r.status_code, r.text)
             else:
@@ -277,4 +267,4 @@ while True:
                 reset_wifi_and_sensor()
             attempts += 1
             time.sleep(3)
-    time.sleep(60)
+    time.sleep(60)                                                                            
