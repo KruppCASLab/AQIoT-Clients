@@ -27,7 +27,7 @@ These are instructions specific to the Raspberry Pi Pico 2040 board and how to c
 	* `WIFI_SSID` This is the name of the WiFi network you are connecting to. The Pico W must connect via WiFi at the time of this writing to upload air quality data.
 	* `WIFI_PASSWORD` This is the PSK that is used to connect to the WiFi network. If a password is not required, this can be left blank and just use two double quotes:
 		* `WIFI_PASSWORD=""`
-	* `CLIENT_ID` This is a legacy setting that is still used in some applications. This does not need to be set and can be left blank
+	* `ENDPOINT_URL` This is the dedicated endpoint that you received when you registered your sensor.
 	* `CLIENT_KEY` This is the key that you acquired when you registered your sensor.
 
 ## Testing
