@@ -21,17 +21,30 @@ def report_config_error(type):
 wifi_ssid = os.getenv("WIFI_SSID")
 wifi_pass = os.getenv("WIFI_PASSWORD")
 
-endpoint_url = os.getenv("ENDPOINT_URL")
+data_endpoint_url = os.getenv("DATA_ENDPOINT_URL")
+log_endpoint_url = os.getenv("LOG_ENDPOINT_URL")
 client_key = os.getenv("CLIENT_KEY")
 
 if wifi_ssid == None or wifi_pass == None:
     report_config_error("WiFi")
-elif endpoint_url == None or client_key == None:
+elif data_endpoint_url == None or log_endpoint_url == None or client_key == None:
     report_config_error("Client")
 
 # Defines led for testing
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
+
+# Log list that will append all logs that were unsuccessful in posting
+log_list = []
+
+# Count variable that keeps track on the amount of times wifi tried to reconnect
+wifi_reconnect_count = 0
+
+# API Key and headers
+headers = {
+    "Content-Type": "application/json",
+    "x-api-key": client_key
+}
 
 def check_if_running():
     """
@@ -48,7 +61,7 @@ def check_if_running():
         time.sleep(0.2)
         times += 1
 
-def handle_wifi_connection(max_attempts = 5, delay = 1):
+def handle_wifi_connection(count = 0, max_attempts = 5, delay = 1):
     """
     Connect to WiFi Network using the SSID and password retrieved from setting.toml.
     """
@@ -58,14 +71,17 @@ def handle_wifi_connection(max_attempts = 5, delay = 1):
     while attempts < max_attempts:
         try:
             wifi.radio.connect(wifi_ssid, wifi_pass)
+            log_create("INFO", 30, "Successfully Connected to the wifi | Count: " + str(count))
             break # Break of the loop if connection is successful
-        except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError, KeyError) as e:
+        except (ValueError, TypeError, RuntimeError, SyntaxError, KeyError, ConnectionError) as e:
             print(type(e).__name__, ":", str(e))
+            log_create("ERROR", 3, str(e))
             report_config_error("Client Misconfig")
             break # Break of the loop if connection is successful
         except Exception as e:
             print("Caught", type(e).__name__, ":", str(e))
             print("Retrying connection, Attempt:", str(attempts + 1))
+            log_create("ERROR", 4, str(e))
             attempts += 1
             time.sleep(delay)
     else:
@@ -85,11 +101,12 @@ def handle_socketpool(max_attempts = 5, delay = 1):
         except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError) as e:
             print(type(e).__name__, ":", str(e))
             print("Potential human error")
-            pool = socketpool.SocketPool(wifi.radio)
+            log_create("ERROR", 5, str(e))
             break # Break of the loop if connection is successful
         except Exception as e:
             print("Caught", type(e).__name__, ":", str(e))
             print("Retrying Pool Creation, Attempt:", str(attempts + 1))
+            log_create("ERROR", 6, str(e))
             attempts += 1
             time.sleep(delay)
     else:
@@ -109,14 +126,16 @@ def handle_requests_session(max_attempts = 5, delay = 1):
         except (AttributeError, ValueError, TypeError, RuntimeError) as e:
             print(type(e).__name__, ":", str(e))
             print("Potential human error")
-            requests = adafruit_requests.Session(pool, ssl.create_default_context())
+            log_create("ERROR", 7, str(e))
             break # Break of the loop if connection is successful
         except NameError as e:
             print("NameError:", str(e))
+            log_create("ERROR", 8, str(e))
             handle_socketpool()
         except Exception as e:
             print("Caught", type(e).__name__, ":", str(e))
             print("Retrying Session Creation, Attempt:", str(attempts + 1))
+            log_create("ERROR", 9, str(e))
             attempts += 1
             time.sleep(delay)
     else:
@@ -135,6 +154,7 @@ def handle_uart():
         uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
     except Exception as e:
         print("Caught", type(e).__name__, ":", str(e))
+        log_create("ERROR", 10, str(e))
         
 # Set pm25 to None initially, otherwise is would get a name error when trying 'if pm25'
 pm25 = None
@@ -149,38 +169,73 @@ def handle_pm25():
         pm25 = PM25_UART(uart, reset_pin)
     except NameError as e:
         print("NameError:", str(e))
+        log_create("ERROR", 11, str(e))
         handle_uart()
     except Exception as e:
         print("Caught", type(e).__name__, ":", str(e))
-        pm25 = PM25_UART(uart, reset_pin)
+        log_create("ERROR", 12, str(e))
         
-def reset_wifi_and_sensor():        
+def reset_wifi_and_sensor(count):        
     # Recall all handling functions
-    handle_wifi_connection()
+    handle_wifi_connection(count)
     handle_socketpool()
     handle_requests_session()
-    handle_uart()
-    handle_pm25()
+    #handle_uart()
+    #handle_pm25()
     
     print("Finished reinitialization variables and recalling functions")
     
     time.sleep(2)
+    
+def log_create(log_type, code, string):
+    log = {
+        "type": log_type, #"INFO" | "WARNING" | "ERROR"
+        "code": code, 
+        "message": string
+    }
+    
+    try:
+        r = requests.post(log_endpoint_url, json=log, headers=headers)
+        if (int(r.status_code) != 200):
+            #print("Error - Response from server: ", r.status_code, r.text)
+            print("Failed to post log, temporarily adding to log list")
+            log_list.append(log)
+        else:
+            #print("Success - Response from server: ", r.status_code, r.text)
+            print("Log successfully posted")
+    except Exception as e:
+        print("Failed to post log, temporarily adding to log list")
+        log_list.append(log)
+        
+def post_log_list():
+    if not log_list:
+        pass # List was empty
+    else:
+        try:
+            for i in log_list:
+                r = requests.post(log_endpoint_url, json=i, headers=headers)
+                if (int(r.status_code) != 200):
+                    #print("Error - Response from server: ", r.status_code, r.text)
+                    print("Could not post log_list. Try again later")
+                else:
+                    #print("Successfully Posted Log - Response from server: ", r.status_code, r.text)
+                    print("Successfully posted log from log list")
+                    log_list.remove(i)
+        except Exception as e:
+            print("Could not post log_list. Try again later")
 
+log_create("INFO", 31, "Pico Powered on")
 handle_wifi_connection()
 handle_socketpool()
 print("Connection to WiFi", wifi_ssid, "Success!")
 handle_requests_session()
+post_log_list()
 #adafruit_requests.request(method: "post", url: "", json_data, float = 60)adafruit_requests.Session(pool, ssl.create_default_context())
 
 reset_pin = None
 handle_uart()
 handle_pm25()
-
-# API Key and headers
-headers = {
-    "Content-Type": "application/json",
-    "x-api-key": client_key
-}
+post_log_list()
 
 #  prints MAC address to REPL
 try:
@@ -206,9 +261,11 @@ while True:
         aqdata = pm25.read()
     except NameError as e:
         print("NameError:", str(e))
+        log_create("ERROR", 13, str(e))
         handle_pm25()
     except Exception as e:
         print("Exception: " + str(e) + ": retrying...")
+        log_create("ERROR", 14, str(e))
         continue
 
     print()
@@ -248,23 +305,36 @@ while True:
         try:
             time.sleep(1)
             json_data = {"pm25": aqdata["pm25 env"],
-                         "pm1" : aqdata["pm10 env"],
-                         "pm10": aqdata["pm100 env"]
+                         "pm10" : aqdata["pm10 env"],
+                         "pm100": aqdata["pm100 env"]
                          }
             print("trying to send JSON post request")
-            #r = requests.post('https://mopsdev.bw.edu/~bkrupp/aq/postreading.php', json=json_data)
-            r = requests.post(endpoint_url, json=json_data, headers=headers)
+            print("Sending data to", data_endpoint_url)
+            print(json_data)
+            r = requests.post(data_endpoint_url, json=json_data, headers=headers)
             if (int(r.status_code) != 200):
                 print("Error - Response from server: ", r.status_code, r.text)
             else:
                 print("Success - Response from server: ", r.status_code, r.text)
             check_if_running()
             break # Break of the loop if connection is successful
-        except Exception as e:
-            print("Unable to send data to server, will attempt on next reading. Error:",str(e))
+        except RuntimeError as e:
+            print(type(e).__name__, ":", str(e))
+            log_create("ERROR", 16, str(e))
             if attempts == 4:
                 print("Reached 5 attempts, resetting wifi and sensor variables")
-                reset_wifi_and_sensor()
+                wifi_reconnect_count += 1
+                reset_wifi_and_sensor(wifi_reconnect_count)
+            attempts += 1
+            time.sleep(1)
+        except Exception as e:
+            print("Unable to send data to server, will attempt on next reading.", type(e).__name__, ":", str(e))
+            log_create("ERROR", 17, str(e))
+            if attempts == 4:
+                print("Reached 5 attempts, resetting wifi and sensor variables")
+                wifi_reconnect_count += 1
+                reset_wifi_and_sensor(wifi_reconnect_count)
             attempts += 1
             time.sleep(3)
+    post_log_list()
     time.sleep(60)                                                                            
