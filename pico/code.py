@@ -264,9 +264,9 @@ while True:
         print("Exception: " + str(e) + ": retrying...")
         if retry_count >= max_pm_retry:
             retry_count = 0
-            log_create("ERROR", 14, str(e))
-        log_create("ERROR", 14, type(e).__name__ + ": " + str(e))
+            log_create("ERROR", 14, type(e).__name__ + ": " + str(e))
         continue
+    
     # Reset retry on success
     retry_count = 0
 
