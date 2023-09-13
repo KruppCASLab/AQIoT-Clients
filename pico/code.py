@@ -25,6 +25,8 @@ data_endpoint_url = os.getenv("DATA_ENDPOINT_URL")
 log_endpoint_url = os.getenv("LOG_ENDPOINT_URL")
 client_key = os.getenv("CLIENT_KEY")
 
+max_pm_retry = 50
+
 if wifi_ssid == None or wifi_pass == None:
     report_config_error("WiFi")
 elif data_endpoint_url == None or log_endpoint_url == None or client_key == None:
@@ -253,6 +255,8 @@ print("Found PM2.5 sensor, reading data...")
 
 check_if_running()
 
+retry_count = 0
+
 while True:
     time.sleep(1)
 
@@ -264,10 +268,16 @@ while True:
         log_create("ERROR", 13, str(e))
         handle_pm25()
     except Exception as e:
+        retry_count = retry_count + 1
         print("Exception: " + str(e) + ": retrying...")
-        log_create("ERROR", 14, str(e))
+        
+        if retry_count >= max_pm_retry:
+            retry_count = 0
+            log_create("ERROR", 14, str(e))
         continue
-
+    
+    # Reset retry on success
+    retry_count = 0
     print()
     print("Concentration Units (standard)")
     print("---------------------------------------")
