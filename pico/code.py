@@ -77,13 +77,13 @@ def handle_wifi_connection(count = 0, max_attempts = 5, delay = 1):
             break # Break of the loop if connection is successful
         except (ValueError, TypeError, RuntimeError, SyntaxError, KeyError, ConnectionError) as e:
             print(type(e).__name__, ":", str(e))
-            log_create("ERROR", 3, str(e))
+            log_create("ERROR", 3, type(e).__name__ + ": " + str(e))
             report_config_error("Client Misconfig")
             break # Break of the loop if connection is successful
         except Exception as e:
             print("Caught", type(e).__name__, ":", str(e))
             print("Retrying connection, Attempt:", str(attempts + 1))
-            log_create("ERROR", 4, str(e))
+            log_create("ERROR", 4, type(e).__name__ + ": " + str(e))
             attempts += 1
             time.sleep(delay)
     else:
@@ -103,12 +103,12 @@ def handle_socketpool(max_attempts = 5, delay = 1):
         except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError) as e:
             print(type(e).__name__, ":", str(e))
             print("Potential human error")
-            log_create("ERROR", 5, str(e))
+            log_create("ERROR", 5, type(e).__name__ + ": " + str(e))
             break # Break of the loop if connection is successful
         except Exception as e:
             print("Caught", type(e).__name__, ":", str(e))
             print("Retrying Pool Creation, Attempt:", str(attempts + 1))
-            log_create("ERROR", 6, str(e))
+            log_create("ERROR", 6, type(e).__name__ + ": " + str(e))
             attempts += 1
             time.sleep(delay)
     else:
@@ -128,23 +128,20 @@ def handle_requests_session(max_attempts = 5, delay = 1):
         except (AttributeError, ValueError, TypeError, RuntimeError) as e:
             print(type(e).__name__, ":", str(e))
             print("Potential human error")
-            log_create("ERROR", 7, str(e))
+            log_create("ERROR", 7, type(e).__name__ + ": " + str(e))
             break # Break of the loop if connection is successful
         except NameError as e:
             print("NameError:", str(e))
-            log_create("ERROR", 8, str(e))
+            log_create("ERROR", 8, type(e).__name__ + ": " + str(e))
             handle_socketpool()
         except Exception as e:
             print("Caught", type(e).__name__, ":", str(e))
             print("Retrying Session Creation, Attempt:", str(attempts + 1))
-            log_create("ERROR", 9, str(e))
+            log_create("ERROR", 9, type(e).__name__ + ": " + str(e))
             attempts += 1
             time.sleep(delay)
     else:
         print("Failed Session Creation")
-
-# Set uart to None initially, otherwise is would get a name error when trying 'if uart'
-uart = None
 
 def handle_uart():
     """
@@ -156,10 +153,7 @@ def handle_uart():
         uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
     except Exception as e:
         print("Caught", type(e).__name__, ":", str(e))
-        log_create("ERROR", 10, str(e))
-        
-# Set pm25 to None initially, otherwise is would get a name error when trying 'if pm25'
-pm25 = None
+        log_create("ERROR", 10, type(e).__name__ + ": " + str(e))
 
 def handle_pm25():
     """
@@ -171,19 +165,17 @@ def handle_pm25():
         pm25 = PM25_UART(uart, reset_pin)
     except NameError as e:
         print("NameError:", str(e))
-        log_create("ERROR", 11, str(e))
+        log_create("ERROR", 11, type(e).__name__ + ": " + str(e))
         handle_uart()
     except Exception as e:
         print("Caught", type(e).__name__, ":", str(e))
-        log_create("ERROR", 12, str(e))
+        log_create("ERROR", 12, type(e).__name__ + ": " + str(e))
         
 def reset_wifi_and_sensor(count):        
     # Recall all handling functions
     handle_wifi_connection(count)
     handle_socketpool()
     handle_requests_session()
-    #handle_uart()
-    #handle_pm25()
     
     print("Finished reinitialization variables and recalling functions")
     
@@ -265,19 +257,19 @@ while True:
         aqdata = pm25.read()
     except NameError as e:
         print("NameError:", str(e))
-        log_create("ERROR", 13, str(e))
+        log_create("ERROR", 13, type(e).__name__ + ": " + str(e))
         handle_pm25()
     except Exception as e:
         retry_count = retry_count + 1
         print("Exception: " + str(e) + ": retrying...")
-        
         if retry_count >= max_pm_retry:
             retry_count = 0
             log_create("ERROR", 14, str(e))
+        log_create("ERROR", 14, type(e).__name__ + ": " + str(e))
         continue
-    
     # Reset retry on success
     retry_count = 0
+
     print()
     print("Concentration Units (standard)")
     print("---------------------------------------")
@@ -330,7 +322,7 @@ while True:
             break # Break of the loop if connection is successful
         except RuntimeError as e:
             print(type(e).__name__, ":", str(e))
-            log_create("ERROR", 16, str(e))
+            log_create("ERROR", 16, type(e).__name__ + ": " + str(e))
             if attempts == 4:
                 print("Reached 5 attempts, resetting wifi and sensor variables")
                 wifi_reconnect_count += 1
@@ -339,7 +331,7 @@ while True:
             time.sleep(1)
         except Exception as e:
             print("Unable to send data to server, will attempt on next reading.", type(e).__name__, ":", str(e))
-            log_create("ERROR", 17, str(e))
+            log_create("ERROR", 17, type(e).__name__ + ": " + str(e))
             if attempts == 4:
                 print("Reached 5 attempts, resetting wifi and sensor variables")
                 wifi_reconnect_count += 1
