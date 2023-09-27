@@ -34,6 +34,7 @@ class ServerLogCode:
     WIFI_REQUESTS_POTENTIAL_HUMAN_ERROR = 7
     WIFI_REQUESTS_CREATION_ERROR_UNDEFINED_POOL = 8
     WIFI_REQUESTS_CREATION_ERROR = 9
+    DEVICE_POWER_ON = 31
 
 
 class Config:
@@ -43,10 +44,103 @@ class Config:
         self.data_url = data_url
         self.log_url = log_url
         self.client_key = client_key
+
+
+class Network:
+    def __init__(self, config: Config):
         self.headers = {
             "Content-Type": "application/json",
-            "x-api-key": self.client_key
+            "x-api-key": config.client_key
         }
+        self.config = config
+        self.socketpool = None
+        self.requests = None
+
+        self.delay_between_attempts = 1
+        self.max_attempts = 5
+
+        self.init_socket_pool()
+        self.init_requests()
+
+
+    def init_socket_pool(self):
+        attempts = 1
+
+        while attempts <= self.max_attempts:
+            try:
+                self.socketpool = socketpool.SocketPool(wifi.radio)
+                break  # Break of the loop if initialization is successful
+            except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError) as e:
+                print(type(e).__name__, ":", str(e))
+                print("Potential human error")
+                log_create(ServerLogType.ERROR, ServerLogCode.WIFI_SOCKET_POOL_HUMAN_ERROR,
+                           type(e).__name__ + ": " + str(e))
+                break  # Human Error
+            except Exception as e:
+                print("Caught", type(e).__name__, ":", str(e))
+                print("Retrying Pool Creation, Attempt:", str(attempts + 1))
+                log_create(ServerLogType.ERROR, ServerLogCode.WIFI_SOCKET_POOL_CREATION_ERROR,
+                           type(e).__name__ + ": " + str(e))
+                attempts += 1
+                time.sleep(self.delay_between_attempts)
+        else:
+            print("Failed Pool Creation")
+
+    def init_requests(self):
+        attempts = 1
+
+        while attempts <= self.max_attempts:
+            try:
+                self.requests = adafruit_requests.Session(self.socketpool, ssl.create_default_context())
+                break  # Break of the loop if initialization is successful
+            except (AttributeError, ValueError, TypeError, RuntimeError) as e:
+                log_create(ServerLogType.ERROR, ServerLogCode.WIFI_REQUESTS_POTENTIAL_HUMAN_ERROR,
+                           type(e).__name__ + ": " + str(e))
+                break  # Human Error
+            except NameError as e:
+                log_create(ServerLogType.ERROR, ServerLogCode.WIFI_REQUESTS_CREATION_ERROR_UNDEFINED_POOL,
+                           type(e).__name__ + ": " + str(e))
+            except Exception as e:
+                print("Retrying Session Creation, Attempt:", str(attempts + 1))
+                log_create(ServerLogType.ERROR, ServerLogCode.WIFI_REQUESTS_CREATION_ERROR,
+                           type(e).__name__ + ": " + str(e))
+                attempts += 1
+                time.sleep(self.delay_between_attempts)
+        else:
+            print("Failed Session Creation")
+
+    def send_log_entry_to_server(self, log):
+        self.send_data(config.log_url, log)
+
+    def send_sensor_data_to_server(self, sensor_data):
+        self.send_data(config.data_url, sensor_data)
+
+    def send_data(self, url, data):
+        if self.requests is not None:
+            attempts = 1
+            while attempts <= self.max_attempts:
+                try:
+                    request = self.requests.post(url, json=data, headers=self.headers)
+                    if int(request.status_code) != 200:
+                        # TODO: Blink failure
+                        print("Error: Unable to send data to server.", request.status_code, request.text)
+                    else:
+                        # TODO: Blink success
+                        print("Success: Data sent to server.", request.status_code)
+                        return True
+                except Exception as e:
+                    print("Exception occurred in sending data to server:", e )
+                    attempts += 1
+
+                attempts += 1
+                time.sleep(self.delay_between_attempts)
+
+            print("Max retry of sending reached")
+            return False
+
+        else:
+            print("Network requests have not yet been defined.")
+            return False
 
 
 def flash_led(error_type: int):
@@ -109,84 +203,35 @@ def connect_to_wifi():
         report_exit_error(Error.WIFI_FAILURE, "Failed to Connect to WiFi")
 
 
-def initialize_socket_pool():
-    global socketpool
-
-    delay = 1
-    attempts = 1
-    max_attempts = 5
-
-    while attempts < max_attempts:
-        try:
-            socketpool = socketpool.SocketPool(wifi.radio)
-            break  # Break of the loop if initialization is successful
-        except (AttributeError, ValueError, TypeError, RuntimeError, SyntaxError) as e:
-            print(type(e).__name__, ":", str(e))
-            print("Potential human error")
-            log_create(ServerLogType.ERROR, ServerLogCode.WIFI_SOCKET_POOL_HUMAN_ERROR,
-                       type(e).__name__ + ": " + str(e))
-            break  # Human Error
-        except Exception as e:
-            print("Caught", type(e).__name__, ":", str(e))
-            print("Retrying Pool Creation, Attempt:", str(attempts + 1))
-            log_create(ServerLogType.ERROR, ServerLogCode.WIFI_SOCKET_POOL_CREATION_ERROR,
-                       type(e).__name__ + ": " + str(e))
-            attempts += 1
-            time.sleep(delay)
-    else:
-        print("Failed Pool Creation")
-
-
-def initialize_requests():
-    global requests
-
-    delay = 1
-    attempts = 1
-    max_attempts = 5
-
-    while attempts <= max_attempts:
-        try:
-            requests = adafruit_requests.Session(pool, ssl.create_default_context())
-            break  # Break of the loop if initialization is successful
-        except (AttributeError, ValueError, TypeError, RuntimeError) as e:
-            log_create(ServerLogType.ERROR, ServerLogCode.WIFI_REQUESTS_POTENTIAL_HUMAN_ERROR,
-                       type(e).__name__ + ": " + str(e))
-            break  # Human Error
-        except NameError as e:
-            log_create(ServerLogType.ERROR, ServerLogCode.WIFI_REQUESTS_CREATION_ERROR_UNDEFINED_POOL,
-                       type(e).__name__ + ": " + str(e))
-        except Exception as e:
-            print("Retrying Session Creation, Attempt:", str(attempts + 1))
-            log_create(ServerLogType.ERROR, ServerLogCode.WIFI_REQUESTS_CREATION_ERROR,
-                       type(e).__name__ + ": " + str(e))
-            attempts += 1
-            time.sleep(delay)
-    else:
-        print("Failed Session Creation")
-
-
 def log_create(log_type, code, string):
-    print("Log Created", log_type, code, string)
+    print("Log Created: ", log_type, code, string)
     log = {
         "type": log_type,  # "INFO" | "WARNING" | "ERROR"
         "code": code,
         "message": string
     }
 
-    try:
-        request = requests.post(config.log_url, json=log, headers=config.headers)
-        if int(request.status_code) != 200:
-            # TODO: Blink failure
-            print("Error - Response from server: ", r.status_code, r.text)
-            print("Failed to post log, temporarily adding to log list")
-            log_list.append(log)
-        else:
-            # TODO: Blink success
-            print("Log successfully posted")
-    except Exception as e:
-        print("Exception occurred:", e, "Will add to log to report.")
+    # Attempt to send log to server, if we cannot or network is not setup, append
+    if network is None or not network.send_log_entry_to_server(log):
         log_list.append(log)
 
+
+def flush_log():
+    print("Attempting to Flush Log List")
+    print(log_list)
+    success = []
+    for log in log_list:
+        result = network.send_log_entry_to_server(log)
+        print("\tAttempting to send:", log)
+        if result == False:
+            print("\tUnable to send log entry:", log)
+        else:
+            print("\tSent log entry", log)
+            success.append(log)
+
+    # Remove the entries that were successful
+    for log in success:
+        log_list.remove(log)
 
 '''
 Define variables and globals we will use throughout
@@ -198,15 +243,22 @@ led.direction = digitalio.Direction.OUTPUT
 # Log list will hold a queue of logs to send to the server
 log_list = []
 
+# Config and network will be used throughout
+config = None
+network = None
+
 '''
 Main Execution 
 '''
+log_create(ServerLogType.INFO, ServerLogCode.DEVICE_POWER_ON, "Pico Powered On")
 config = load_toml_config()
-
 connect_to_wifi()
-initialize_socket_pool()
-initialize_requests()
+network = Network(config)
+flush_log()
 
+'''
+EXIT
+'''
 sys.exit(1)
 
 max_pm_retry = 50
@@ -278,22 +330,7 @@ def reset_wifi_and_sensor(count):
     time.sleep(2)
 
 
-def post_log_list():
-    if not log_list:
-        pass  # List was empty
-    else:
-        try:
-            for i in log_list:
-                r = requests.post(log_endpoint_url, json=i, headers=headers)
-                if (int(r.status_code) != 200):
-                    # print("Error - Response from server: ", r.status_code, r.text)
-                    print("Could not post log_list. Try again later")
-                else:
-                    # print("Successfully Posted Log - Response from server: ", r.status_code, r.text)
-                    print("Successfully posted log from log list")
-                    log_list.remove(i)
-        except Exception as e:
-            print("Could not post log_list. Try again later")
+
 
 
 log_create("INFO", 31, "Pico Powered on")
