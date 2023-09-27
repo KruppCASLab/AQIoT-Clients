@@ -211,10 +211,14 @@ def flash_led(error_type: int):
         time.sleep(1)
     time.sleep(3)  # Circuit python has 5-second delay between errors, must not use 5 as value
 
+
 def flash_led_active():
-    led.value = True
-    time.sleep(0.2)
-    led.value = False
+    for i in range(2):
+        led.value = True
+        time.sleep(0.1)
+        led.value = False
+        time.sleep(0.1)
+
 
 def report_exit_error(error_type, label):
     print("Error type:", error_type, label)
