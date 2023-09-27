@@ -34,6 +34,11 @@ class ServerLogCode:
     WIFI_REQUESTS_POTENTIAL_HUMAN_ERROR = 7
     WIFI_REQUESTS_CREATION_ERROR_UNDEFINED_POOL = 8
     WIFI_REQUESTS_CREATION_ERROR = 9
+    SENSOR_UART_FAIL = 10
+    SENSOR_PM25_CREATE_FAIL_NO_UART = 11
+    SENSOR_PM25_CREATE_FAIL = 12
+    SENSOR_PM25_UNDEFINED = 13
+    SENSOR_PM25_READ_FAIL = 14
     DEVICE_POWER_ON = 31
 
 
@@ -44,6 +49,57 @@ class Config:
         self.data_url = data_url
         self.log_url = log_url
         self.client_key = client_key
+
+
+class Sensor:
+    def __init__(self):
+        self.uart = None
+        self.pm25 = None
+
+        self.delay_between_attempts = 1
+        self.max_attempts = 50
+
+        self.init_uart()
+        self.init_pm25()
+
+    def init_uart(self):
+        try:
+            self.uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
+        except Exception as e:
+
+            log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_UART_FAIL, type(e).__name__ + ": " + str(e))
+
+    def init_pm25(self):
+        try:
+            self.pm25 = PM25_UART(self.uart, None)  # 2nd parameter is reset pin
+        except NameError as e:
+            log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_CREATE_FAIL_NO_UART, type(e).__name__ + ": " + str(e))
+            handle_uart()
+        except Exception as e:
+            log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_CREATE_FAIL, type(e).__name__ + ": " + str(e))
+
+    def read(self):
+        for i in range(0, self.max_attempts):
+            try:
+                reading = self.pm25.read()
+                aqdata = AQData(reading["pm10 env"], reading["pm25 env"], reading["pm100 env"])
+                return aqdata
+            except NameError as e:
+                log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_UNDEFINED, type(e).__name__ + ": " + str(e))
+                time.sleep(self.delay_between_attempts)
+            except Exception as e:
+                print("Exception reading sensor: " + str(e) + ": retrying...")
+                time.sleep(self.delay_between_attempts)
+
+        log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_READ_FAIL,
+                   "PM25 Read Failure: Reached Max Retry Count: " + str(self.max_attempts))
+
+
+class AQData:
+    def __init__(self, pm10, pm25, pm100):
+        self.pm10 = pm10
+        self.pm25 = pm25
+        self.pm100 = pm100
 
 
 class Network:
@@ -112,8 +168,12 @@ class Network:
     def send_log_entry_to_server(self, log):
         self.send_data(config.log_url, log)
 
-    def send_sensor_data_to_server(self, sensor_data):
-        self.send_data(config.data_url, sensor_data)
+    def send_sensor_data_to_server(self, sensor_data: AQData):
+        json_data = {"pm25": sensor_data.pm25,
+                     "pm10": sensor_data.pm10,
+                     "pm100": sensor_data.pm100
+                     }
+        self.send_data(config.data_url, json_data)
 
     def send_data(self, url, data):
         if self.requests is not None:
@@ -151,6 +211,10 @@ def flash_led(error_type: int):
         time.sleep(1)
     time.sleep(3)  # Circuit python has 5-second delay between errors, must not use 5 as value
 
+def flash_led_active():
+    led.value = True
+    time.sleep(0.2)
+    led.value = False
 
 def report_exit_error(error_type, label):
     print("Error type:", error_type, label)
@@ -184,11 +248,14 @@ def connect_to_wifi():
 
     print("Attempting to Connect to SSID:", config.wifi_ssid)
 
+    mac_address = [hex(i) for i in wifi.radio.mac_address]
+
     while attempts <= max_attempts:
         try:
             wifi.radio.connect(config.wifi_ssid, config.wifi_pass)
             log_create(ServerLogType.INFO, ServerLogCode.WIFI_CONNECT_SUCCESS,
-                       "Successfully Connected to the wifi | Attempt: " + str(attempts))
+                       "Successfully Connected to the wifi. Mac: " + str(mac_address) + " IP: " +
+                       str(wifi.radio.ipv4_address) + " | Attempt: " + str(attempts))
             break
         except (ValueError, TypeError, RuntimeError, SyntaxError, KeyError, ConnectionError, Exception) as e:
             log_create(ServerLogType.ERROR, ServerLogCode.WIFI_CONNECT_FAILED,
@@ -216,9 +283,12 @@ def log_create(log_type, code, string):
         log_list.append(log)
 
 
+def print_sensor_data(sensor_data: AQData):
+    print("Sensor Reading:", sensor_data.pm25, "pm25")
+
+
 def flush_log():
     print("Attempting to Flush Log List")
-    print(log_list)
     success = []
     for log in log_list:
         result = network.send_log_entry_to_server(log)
@@ -236,6 +306,9 @@ def flush_log():
 '''
 Define variables and globals we will use throughout
 '''
+# Time between readings
+delay = 60
+
 # Defines led for testing
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
@@ -243,7 +316,7 @@ led.direction = digitalio.Direction.OUTPUT
 # Log list will hold a queue of logs to send to the server
 log_list = []
 
-# Config and network will be used throughout
+# Config and network will be used globally, so declare here
 config = None
 network = None
 
@@ -252,206 +325,22 @@ Main Execution
 '''
 log_create(ServerLogType.INFO, ServerLogCode.DEVICE_POWER_ON, "Pico Powered On")
 config = load_toml_config()
+
+# Initialize wifi, network, and sensor
 connect_to_wifi()
 network = Network(config)
 flush_log()
+sensor = Sensor()
 
-'''
-EXIT
-'''
-sys.exit(1)
-
-max_pm_retry = 50
-
-# Log list that will append all logs that were unsuccessful in posting
-
-
-# Count variable that keeps track on the amount of times wifi tried to reconnect
-wifi_reconnect_count = 0
-
-
-# API Key and headers
-
-
-def check_if_running():
-    """
-    Will blink on and off continuously for 2 seconds after the initial handling functions are successful and then at
-    the end of each response from the server after posting the json
-
-    This will allow us to see whether the code is running properly from the pico's led alone
-    """
-    times = 0
-    while times < 5:
-        led.value = True
-        time.sleep(0.2)
-        led.value = False
-        time.sleep(0.2)
-        times += 1
-
-
-def handle_uart():
-    """
-    Create UART object by defining the pins and baudrate and handles possible exceptions.
-    """
-    global uart
-
-    try:
-        uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
-    except Exception as e:
-        print("Caught", type(e).__name__, ":", str(e))
-        log_create("ERROR", 10, type(e).__name__ + ": " + str(e))
-
-
-def handle_pm25():
-    """
-    Initialize the PM2.5 sensor connected via UART and handles possible exceptions.
-    """
-    global pm25
-
-    try:
-        pm25 = PM25_UART(uart, reset_pin)
-    except NameError as e:
-        print("NameError:", str(e))
-        log_create("ERROR", 11, type(e).__name__ + ": " + str(e))
-        handle_uart()
-    except Exception as e:
-        print("Caught", type(e).__name__, ":", str(e))
-        log_create("ERROR", 12, type(e).__name__ + ": " + str(e))
-
-
-def reset_wifi_and_sensor(count):
-    # Recall all handling functions
-    handle_wifi_connection(count)
-    handle_socketpool()
-    handle_requests_session()
-
-    print("Finished reinitialization variables and recalling functions")
-
-    time.sleep(2)
-
-
-
-
-
-log_create("INFO", 31, "Pico Powered on")
-handle_wifi_connection()
-handle_socketpool()
-print("Connection to WiFi", wifi_ssid, "Success!")
-handle_requests_session()
-post_log_list()
-# adafruit_requests.request(method: "post", url: "", json_data, float = 60)adafruit_requests.Session(pool, ssl.create_default_context())
-
-reset_pin = None
-handle_uart()
-handle_pm25()
-post_log_list()
-
-#  prints MAC address to REPL
-try:
-    print("My MAC addr:", [hex(i) for i in wifi.radio.mac_address])
-except Exception as e:
-    print("Error printing MAC address:", str(e))
-
-#  prints IP address to REPL
-try:
-    print("My IP address is", wifi.radio.ipv4_address)
-except Exception as e:
-    print("Error printing IP address:", str(e))
-
-print("Found PM2.5 sensor, reading data...")
-
-check_if_running()
-
-retry_count = 0
-
+# Read sensor and post data to server
 while True:
-    time.sleep(1)
+    flash_led_active()
+    data = sensor.read()
+    print_sensor_data(data)
+    network.send_sensor_data_to_server(data)
 
-    try:
-        print("Attempting pm25 read again...")
-        aqdata = pm25.read()
-    except NameError as e:
-        print("NameError:", str(e))
-        log_create("ERROR", 13, type(e).__name__ + ": " + str(e))
-        handle_pm25()
-    except Exception as e:
-        retry_count = retry_count + 1
-        print("Exception: " + str(e) + ": retrying...")
-        if retry_count >= max_pm_retry:
-            log_create("ERROR", 14, type(e).__name__ + ": " + str(e) + " | Retry Count: " + str(retry_count))
-            retry_count = 0
-        continue
+    # Make sure any log entries are sent
+    flush_log()
 
-    # Reset retry on success
-    retry_count = 0
-
-    print()
-    print("Concentration Units (standard)")
-    print("---------------------------------------")
-    try:
-        print(
-            "PM 1.0: %d\tPM2.5: %d\tPM10: %d"
-            % (aqdata["pm10 standard"], aqdata["pm25 standard"], aqdata["pm100 standard"])
-        )
-    except Exception as e:
-        print("Failed to print Standard Concentration Units")
-    print("Concentration Units (environmental)")
-    print("---------------------------------------")
-    try:
-        print(
-            "PM 1.0: %d\tPM2.5: %d\tPM10: %d"
-            % (aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"])
-        )
-    except Exception as e:
-        print("Failed to print Environmental Concentration Units")
-    print("---------------------------------------")
-    try:
-        print("Particles > 0.3um / 0.1L air:", aqdata["particles 03um"])
-        print("Particles > 0.5um / 0.1L air:", aqdata["particles 05um"])
-        print("Particles > 1.0um / 0.1L air:", aqdata["particles 10um"])
-        print("Particles > 2.5um / 0.1L air:", aqdata["particles 25um"])
-        print("Particles > 5.0um / 0.1L air:", aqdata["particles 50um"])
-        print("Particles > 10 um / 0.1L air:", aqdata["particles 100um"])
-    except Exception as e:
-        print("Failed to print Particle Amounts")
-    print("---------------------------------------")
-
-    attempts = 0
-
-    while attempts < 5:
-        try:
-            time.sleep(1)
-            json_data = {"pm25": aqdata["pm25 env"],
-                         "pm10": aqdata["pm10 env"],
-                         "pm100": aqdata["pm100 env"]
-                         }
-            print("trying to send JSON post request")
-            print("Sending data to", data_endpoint_url)
-            print(json_data)
-            r = requests.post(data_endpoint_url, json=json_data, headers=headers)
-            if (int(r.status_code) != 200):
-                print("Error - Response from server: ", r.status_code, r.text)
-            else:
-                print("Success - Response from server: ", r.status_code, r.text)
-            check_if_running()
-            break  # Break of the loop if connection is successful
-        except RuntimeError as e:
-            print(type(e).__name__, ":", str(e))
-            log_create("ERROR", 16, type(e).__name__ + ": " + str(e))
-            if attempts == 4:
-                print("Reached 5 attempts, resetting wifi and sensor variables")
-                wifi_reconnect_count += 1
-                reset_wifi_and_sensor(wifi_reconnect_count)
-            attempts += 1
-            time.sleep(1)
-        except Exception as e:
-            print("Unable to send data to server, will attempt on next reading.", type(e).__name__, ":", str(e))
-            log_create("ERROR", 17, type(e).__name__ + ": " + str(e))
-            if attempts == 4:
-                print("Reached 5 attempts, resetting wifi and sensor variables")
-                wifi_reconnect_count += 1
-                reset_wifi_and_sensor(wifi_reconnect_count)
-            attempts += 1
-            time.sleep(3)
-    post_log_list()
-    time.sleep(60)
+    print("Attempting next reading in", delay, "seconds")
+    time.sleep(delay)
