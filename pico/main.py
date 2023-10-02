@@ -40,6 +40,7 @@ class ServerLogCode:
     SENSOR_PM25_UNDEFINED = 13
     SENSOR_PM25_READ_FAIL = 14
     DEVICE_POWER_ON = 31
+    WIFI_INITIAL_LOST = 44
 
 
 class Config:
@@ -117,7 +118,6 @@ class Network:
 
         self.init_socket_pool()
         self.init_requests()
-
 
     def init_socket_pool(self):
         attempts = 1
@@ -201,6 +201,9 @@ class Network:
         else:
             print("Network requests have not yet been defined.")
             return False
+
+    def is_connected(self):
+        return wifi.radio.connected
 
 
 def flash_led(error_type: int):
@@ -339,12 +342,16 @@ sensor = Sensor()
 # Read sensor and post data to server
 while True:
     flash_led_active()
-    data = sensor.read()
-    print_sensor_data(data)
-    network.send_sensor_data_to_server(data)
+    if network.is_connected():  
+        data = sensor.read()
+        print_sensor_data(data)
+        network.send_sensor_data_to_server(data)
 
-    # Make sure any log entries are sent
-    flush_log()
+        # Make sure any log entries are sent
+        flush_log()
 
-    print("Attempting next reading in", delay, "seconds")
-    time.sleep(delay)
+        print("Attempting next reading in", delay, "seconds")
+        time.sleep(delay)
+    else:
+        log_create(ServerLogType.INFO, ServerLogCode.WIFI_INITIAL_LOST, "Initial WiFi Lost - Recreating")
+        network = Network(config)
