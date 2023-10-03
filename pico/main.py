@@ -166,7 +166,7 @@ class Network:
             print("Failed Session Creation")
 
     def send_log_entry_to_server(self, log):
-        self.send_data(config.log_url, log)
+        return self.send_data(config.log_url, log)
 
     def send_sensor_data_to_server(self, sensor_data: AQData):
         json_data = {"pm25": sensor_data.pm25,
@@ -188,8 +188,11 @@ class Network:
                         # TODO: Blink success
                         print("Success: Data sent to server.", request.status_code)
                         return True
+                except RuntimeError as re:
+                    print("Runtime error occurrred in sending data to server:", re)
+                    attempts += 1
                 except Exception as e:
-                    print("Exception occurred in sending data to server:", e )
+                    print("Exception occurred in sending data to server:", type(e), str(e) )
                     attempts += 1
 
                 attempts += 1
@@ -298,8 +301,8 @@ def flush_log():
     print("Attempting to Flush Log List")
     success = []
     for log in log_list:
-        result = network.send_log_entry_to_server(log)
         print("\tAttempting to send:", log)
+        result = network.send_log_entry_to_server(log)
         if result == False:
             print("\tUnable to send log entry:", log)
         else:
@@ -342,8 +345,10 @@ sensor = Sensor()
 # Read sensor and post data to server
 while True:
     flash_led_active()
-    if network.is_connected():  
+    if network.is_connected():
+        print("Network is connected: ")
         data = sensor.read()
+        print("Sensor data received:", data.pm25)
         print_sensor_data(data)
         network.send_sensor_data_to_server(data)
 
