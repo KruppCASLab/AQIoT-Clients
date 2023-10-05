@@ -39,6 +39,8 @@ class ServerLogCode:
     SENSOR_PM25_CREATE_FAIL = 12
     SENSOR_PM25_UNDEFINED = 13
     SENSOR_PM25_READ_FAIL = 14
+    DATA_POST_FAILED = 16
+    DATA_POST_FAILED_MAX_RETRY = 18
     DEVICE_POWER_ON = 31
     WIFI_INITIAL_LOST = 44
 
@@ -67,7 +69,6 @@ class Sensor:
         try:
             self.uart = busio.UART(board.GP0, board.GP1, baudrate=9600)
         except Exception as e:
-
             log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_UART_FAIL, type(e).__name__ + ": " + str(e))
 
     def init_pm25(self):
@@ -75,7 +76,6 @@ class Sensor:
             self.pm25 = PM25_UART(self.uart, None)  # 2nd parameter is reset pin
         except NameError as e:
             log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_CREATE_FAIL_NO_UART, type(e).__name__ + ": " + str(e))
-            handle_uart()
         except Exception as e:
             log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_CREATE_FAIL, type(e).__name__ + ": " + str(e))
 
@@ -173,7 +173,7 @@ class Network:
                      "pm10": sensor_data.pm10,
                      "pm100": sensor_data.pm100
                      }
-        self.send_data(config.data_url, json_data)
+        return self.send_data(config.data_url, json_data)
 
     def send_data(self, url, data):
         if self.requests is not None:
@@ -183,22 +183,28 @@ class Network:
                     request = self.requests.post(url, json=data, headers=self.headers)
                     if int(request.status_code) != 200:
                         # TODO: Blink failure
-                        print("Error: Unable to send data to server.", request.status_code, request.text)
+                        log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
+                                   "Error: Received unexpected response from server." + request.status_code + request.text)
                     else:
                         # TODO: Blink success
                         print("Success: Data sent to server.", request.status_code)
                         return True
                 except RuntimeError as re:
-                    print("Runtime error occurrred in sending data to server:", re)
+                    log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
+                               "Error: Timeout in sending data to server. Exception: " + str(re))
                     attempts += 1
                 except Exception as e:
-                    print("Exception occurred in sending data to server:", type(e), str(e) )
+                    log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
+                               "Error: Exception in sending data to server. Exception: " + str(e))
+                    print("Exception occurred in sending data to server:", type(e), str(e))
                     attempts += 1
 
                 attempts += 1
                 time.sleep(self.delay_between_attempts)
 
             print("Max retry of sending reached")
+            log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED_MAX_RETRY,
+                       "Error: Max Retry Reached in Sending Data")
             return False
 
         else:
