@@ -180,14 +180,16 @@ class Network:
             attempts = 1
             while attempts <= self.max_attempts:
                 try:
-                    request = self.requests.post(url, json=data, headers=self.headers)
-                    if int(request.status_code) != 200:
+                    response = self.requests.post(url, json=data, headers=self.headers)
+                    if int(response.status_code) != 200:
                         # TODO: Blink failure
                         log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                                   "Error: Received unexpected response from server." + request.status_code + request.text)
+                                   "Error: Received unexpected response from server." + response.status_code + response.text)
+                        response.close()
                     else:
                         # TODO: Blink success
-                        print("Success: Data sent to server.", request.status_code)
+                        print("Success: Data sent to server.", response.status_code)
+                        response.close()
                         return True
                 except RuntimeError as re:
                     log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
