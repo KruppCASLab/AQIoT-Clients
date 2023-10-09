@@ -257,7 +257,7 @@ def load_toml_config():
     return config
 
 
-def connect_to_wifi():
+def connect_to_wifi(is_initial=True):
     attempts = 1
     delay = 1
     max_attempts = 25
@@ -269,9 +269,10 @@ def connect_to_wifi():
     while attempts <= max_attempts:
         try:
             wifi.radio.connect(config.wifi_ssid, config.wifi_pass)
-            log_create(ServerLogType.INFO, ServerLogCode.WIFI_CONNECT_SUCCESS,
-                       "Successfully Connected to the wifi. Mac: " + str(mac_address) + " IP: " +
-                       str(wifi.radio.ipv4_address) + " | Attempt: " + str(attempts))
+            if is_initial:
+                log_create(ServerLogType.INFO, ServerLogCode.WIFI_CONNECT_SUCCESS,
+                           "Successfully Connected to the wifi. Mac: " + str(mac_address) + " IP: " +
+                           str(wifi.radio.ipv4_address) + " | Attempt: " + str(attempts))
             break
         except (ValueError, TypeError, RuntimeError, SyntaxError, KeyError, ConnectionError, Exception) as e:
             log_create(ServerLogType.ERROR, ServerLogCode.WIFI_CONNECT_FAILED,
@@ -283,8 +284,12 @@ def connect_to_wifi():
             time.sleep(delay)
     else:
         # At this point, if we cannot connect to wifi after max attempts, report failure
-        report_exit_error(Error.WIFI_FAILURE, "Failed to Connect to WiFi")
+        if is_initial:
+            report_exit_error(Error.WIFI_FAILURE, "Failed to Connect to WiFi")
+        else:
+            return False
 
+    return True
 
 def log_create(log_type, code, string):
     print("Log Created: ", log_type, code, string)
@@ -351,7 +356,8 @@ sensor = Sensor()
 # Read sensor and post data to server
 while True:
     flash_led_active()
-    if network.is_connected():
+    connected = connect_to_wifi(False)
+    if connected:
         print("Network is connected: ")
         data = sensor.read()
         print("Sensor data received:", data.pm25)
