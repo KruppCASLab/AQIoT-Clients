@@ -167,7 +167,8 @@ class Network:
             print("Failed Session Creation")
 
     def send_log_entry_to_server(self, log):
-        return self.send_data(config.log_url, log)
+        # Don't log on failure that we cannot send the entry
+        return self.send_data(config.log_url, log, False)
 
     def send_sensor_data_to_server(self, sensor_data: AQData):
         json_data = {"pm25": sensor_data.pm25,
@@ -176,7 +177,7 @@ class Network:
                      }
         return self.send_data(config.data_url, json_data)
 
-    def send_data(self, url, data):
+    def send_data(self, url, data, should_log=True):
         if self.requests is not None:
             attempts = 1
             while attempts <= self.max_attempts:
@@ -184,8 +185,9 @@ class Network:
                     response = self.requests.post(url, json=data, headers=self.headers)
                     if int(response.status_code) != 200:
                         # TODO: Blink failure
-                        log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                                   "Error: Received unexpected response from server." + response.status_code + response.text)
+                        if should_log:
+                            log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
+                                       "Error: Received unexpected response from server." + response.status_code + response.text)
                         response.close()
                     else:
                         # TODO: Blink success
@@ -193,12 +195,14 @@ class Network:
                         response.close()
                         return True
                 except RuntimeError as re:
-                    log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                               "Error: Timeout in sending data to server. Exception: " + str(re))
+                    if should_log:
+                        log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
+                                   "Error: Timeout in sending data to server. Exception: " + str(re))
                     attempts += 1
                 except Exception as e:
-                    log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                               "Error: Exception in sending data to server. Exception: " + str(e))
+                    if should_log:
+                        log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
+                                   "Error: Exception in sending data to server. Exception: " + str(e))
                     print("Exception occurred in sending data to server:", type(e), str(e))
                     attempts += 1
 
@@ -206,8 +210,9 @@ class Network:
                 time.sleep(self.delay_between_attempts)
 
             print("Max retry of sending reached")
-            log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED_MAX_RETRY,
-                       "Error: Max Retry Reached in Sending Data")
+            if should_log:
+                log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED_MAX_RETRY,
+                           "Error: Max Retry Reached in Sending Data")
             return False
 
         else:
@@ -274,7 +279,9 @@ def connect_to_wifi(is_initial=True):
             wifi.radio.connect(config.wifi_ssid, config.wifi_pass)
             if is_initial:
                 log_create(ServerLogType.INFO, ServerLogCode.WIFI_CONNECT_SUCCESS,
-                           "Successfully Connected to the wifi. Mac: " + str(mac_address) + " IP: " +
+                           "Successfully Connected to the wifi: " +
+                           str(config.wifi_ssid) + " | " +
+                           "Mac: " + str(mac_address) + " IP: " +
                            str(wifi.radio.ipv4_address) + " | Attempt: " + str(attempts))
             break
         except (ValueError, TypeError, RuntimeError, SyntaxError, KeyError, ConnectionError, Exception) as e:
