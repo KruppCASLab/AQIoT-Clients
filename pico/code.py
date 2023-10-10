@@ -43,6 +43,7 @@ class ServerLogCode:
     DATA_POST_FAILED_MAX_RETRY = 18
     DEVICE_POWER_ON = 31
     WIFI_INITIAL_LOST = 44
+    GENERAL_EXCEPTION = -9
 
 
 class Config:
@@ -357,20 +358,23 @@ sensor = Sensor()
 
 # Read sensor and post data to server
 while True:
-    flash_led_active()
-    connected = connect_to_wifi(False)
-    if connected:
-        print("Network is connected: ")
-        data = sensor.read()
-        print("Sensor data received:", data.pm25)
-        print_sensor_data(data)
-        network.send_sensor_data_to_server(data)
+    try:
+        flash_led_active()
+        connected = connect_to_wifi(False)
+        if connected:
+            print("Network is connected: ")
+            data = sensor.read()
+            print("Sensor data received:", data.pm25)
+            print_sensor_data(data)
+            network.send_sensor_data_to_server(data)
 
-        # Make sure any log entries are sent
-        flush_log()
+            # Make sure any log entries are sent
+            flush_log()
 
-        print("Attempting next reading in", delay, "seconds")
-        time.sleep(delay)
-    else:
-        log_create(ServerLogType.INFO, ServerLogCode.WIFI_INITIAL_LOST, "Initial WiFi Lost - Recreating")
-        network = Network(config)
+            print("Attempting next reading in", delay, "seconds")
+            time.sleep(delay)
+        else:
+            log_create(ServerLogType.INFO, ServerLogCode.WIFI_INITIAL_LOST, "Initial WiFi Lost - Recreating")
+            network = Network(config)
+    except Exception as e:
+        log_create(ServerLogType.ERROR, ServerLogCode.GENERAL_EXCEPTION, "An general exception occurred" + str(e) + type(e))
