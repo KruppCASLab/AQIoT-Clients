@@ -1,3 +1,8 @@
+"""
+CircuitPython Version of Pico AQ Sensor
+CircuitPython defaults to code.py
+"""
+
 import time
 import board
 import busio
@@ -76,7 +81,8 @@ class Sensor:
         try:
             self.pm25 = PM25_UART(self.uart, None)  # 2nd parameter is reset pin
         except NameError as e:
-            log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_CREATE_FAIL_NO_UART, type(e).__name__ + ": " + str(e))
+            log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_CREATE_FAIL_NO_UART,
+                       type(e).__name__ + ": " + str(e))
         except Exception as e:
             log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_CREATE_FAIL, type(e).__name__ + ": " + str(e))
 
@@ -301,6 +307,7 @@ def connect_to_wifi(is_initial=True):
 
     return True
 
+
 def log_create(log_type, code, string):
     print("Log Created: ", log_type, code, string)
     log = {
@@ -333,6 +340,7 @@ def flush_log():
     # Remove the entries that were successful
     for log in success:
         log_list.remove(log)
+
 
 '''
 Define variables and globals we will use throughout
@@ -384,4 +392,8 @@ while True:
             log_create(ServerLogType.INFO, ServerLogCode.WIFI_INITIAL_LOST, "Initial WiFi Lost - Recreating")
             network = Network(config)
     except Exception as e:
-        log_create(ServerLogType.ERROR, ServerLogCode.GENERAL_EXCEPTION, "An general exception occurred" + str(e) + type(e))
+        log_create(ServerLogType.ERROR, ServerLogCode.GENERAL_EXCEPTION,
+                   "An general exception occurred" + str(e) + type(e))
+    except Error as e:
+        log_create(ServerLogType.ERROR, ServerLogCode.GENERAL_EXCEPTION,
+                   "An general exception occurred" + str(e) + type(e))
