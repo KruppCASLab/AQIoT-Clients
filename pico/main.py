@@ -288,9 +288,7 @@ def log_create(log_type, code, string):
         "message": string
     }
 
-    # Attempt to send log to server, if we cannot or network is not setup, append
-    if services is None or not services.is_connected() or not services.send_log_entry_to_server(log):
-        log_list.append(log)
+    log_list.append(log)
 
 
 def print_sensor_data(sensor_data: AQData):
@@ -402,6 +400,9 @@ while True:
             print("Network is connected.", "WLAN Status:",
                   NetworkStatus.return_string_status(wlan.status()))
             data = sensor.read()
+            if data is None:
+                print("No sensor data was returned")
+                continue
             print("Sensor data received:", data.pm25)
             print_sensor_data(data)
             services.send_sensor_data_to_server(data)
