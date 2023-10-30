@@ -339,7 +339,7 @@ def flush_log():
 
 def load_config():
     try:
-        with open("config.txt") as fd:
+        with open("config.json") as fd:
             config_data = json.load(fd)
             config = Config(config_data["wifi_ssid"],
                           config_data["wifi_pass"],
