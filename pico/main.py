@@ -16,6 +16,7 @@ import json
 class NetworkStatus:
     idle = 0
     connecting = 1
+    no_ip = 2
     wrong_password = -3
     no_ap = -2
     connect_fail = -1
@@ -24,6 +25,7 @@ class NetworkStatus:
     string_status = {
         idle : "Idle",
         connecting : "Connecting",
+        no_ip: "No IP",
         wrong_password : "Wrong Password",
         no_ap : "Access Point Does Not Exist",
         connect_fail : "Connect to Access Point Failed",
@@ -268,7 +270,7 @@ def connect_to_wifi(is_initial=True):
 
     else:
         if is_initial:
-            report_exit_error(Error.WIFI_FAILURE, "Unable to make initial connection to WiFi")
+            report_error(Error.WIFI_FAILURE, "Unable to make initial connection to WiFi")
         elif attempts == max_attempts:
             log_create(ServerLogType.ERROR, ServerLogCode.WIFI_CONNECT_FAILED,
                        "Unable to connect to wifi after max attempts " + str(attempts))
@@ -312,9 +314,9 @@ def flash_led_active():
         time.sleep(0.1)
 
 
-def report_exit_error(error_type, label):
+def report_error(error_type, label):
     print("Error type:", error_type, label)
-    while True:
+    for i in range(5):
         flash_led(error_type)
 
 
@@ -345,9 +347,9 @@ def load_config():
                           config_data["log_url"],
                           config_data["client_key"])
             if config.wifi_ssid is None or config.wifi_pass is None:
-                report_exit_error(Error.CONFIG_WIFI, "WiFi config missing from toml configuration.")
+                report_error(Error.CONFIG_WIFI, "WiFi config missing from toml configuration.")
             elif config.data_url is None or config.log_url is None or config.client_key is None:
-                report_exit_error(Error.CONFIG_ENDPOINT, "Endpoint config missing from toml configuration.")
+                report_error(Error.CONFIG_ENDPOINT, "Endpoint config missing from toml configuration.")
 
             return config
     except:
@@ -378,8 +380,9 @@ Main Execution
 '''
 log_create(ServerLogType.INFO, ServerLogCode.DEVICE_POWER_ON, "Pico Powered On")
 config = load_config()
-if config is None:
-    report_exit_error(Error.CONFIG_WIFI, "None config returned")
+while config is None:
+    report_error(Error.CONFIG_WIFI, "None config returned")
+    config = load_config()
 
 # Initialize wifi, network, and sensor
 while True:
@@ -417,4 +420,5 @@ while True:
             services = Services(config)
     except Exception as e:
         log_create(ServerLogType.ERROR, ServerLogCode.GENERAL_EXCEPTION, "An general exception occurred" + str(e) + type(e))
+
 
