@@ -246,29 +246,34 @@ def flash_led_active():
         time.sleep(0.1)
 
 
-def report_exit_error(error_type, label):
+def report_error(error_type, label):
     print("Error type:", error_type, label)
-    while True:
+    for i in range(5):
         flash_led(error_type)
 
 
 def load_toml_config():
-    # Get configuration variables from settings.toml file
-    wifi_ssid = os.getenv("WIFI_SSID")
-    wifi_pass = os.getenv("WIFI_PASSWORD")
+    try:
+        # Get configuration variables from settings.toml file
+        wifi_ssid = os.getenv("WIFI_SSID")
+        wifi_pass = os.getenv("WIFI_PASSWORD")
 
-    data_endpoint_url = os.getenv("DATA_ENDPOINT_URL")
-    log_endpoint_url = os.getenv("LOG_ENDPOINT_URL")
-    client_key = os.getenv("CLIENT_KEY")
+        data_endpoint_url = os.getenv("DATA_ENDPOINT_URL")
+        log_endpoint_url = os.getenv("LOG_ENDPOINT_URL")
+        client_key = os.getenv("CLIENT_KEY")
 
-    if wifi_ssid is None or wifi_pass is None:
-        report_exit_error(Error.CONFIG_WIFI, "WiFi config missing from toml configuration.")
-    elif data_endpoint_url is None or log_endpoint_url is None or client_key is None:
-        report_exit_error(Error.CONFIG_ENDPOINT, "Endpoint config missing from toml configuration.")
+        if wifi_ssid is None or wifi_pass is None:
+            report_error(Error.CONFIG_WIFI, "WiFi config missing from toml configuration.")
+            return None
+        elif data_endpoint_url is None or log_endpoint_url is None or client_key is None:
+            report_error(Error.CONFIG_ENDPOINT, "Endpoint config missing from toml configuration.")
+            return None
 
-    config = Config(wifi_ssid, wifi_pass, data_endpoint_url, log_endpoint_url, client_key)
+        config = Config(wifi_ssid, wifi_pass, data_endpoint_url, log_endpoint_url, client_key)
 
-    return config
+        return config
+    except:
+        return None
 
 
 def connect_to_wifi(is_initial=True):
@@ -301,9 +306,8 @@ def connect_to_wifi(is_initial=True):
     else:
         # At this point, if we cannot connect to wifi after max attempts, report failure
         if is_initial:
-            report_exit_error(Error.WIFI_FAILURE, "Failed to Connect to WiFi")
-        else:
-            return False
+            report_error(Error.WIFI_FAILURE, "Failed to Connect to WiFi")
+        return False
 
     return True
 
@@ -364,6 +368,9 @@ Main Execution
 '''
 log_create(ServerLogType.INFO, ServerLogCode.DEVICE_POWER_ON, "Pico Powered On")
 config = load_toml_config()
+while config is None:
+    report_error(Error.CONFIG_WIFI, "None config returned")
+    config = load_toml_config()
 
 # Initialize wifi, network, and sensor
 connect_to_wifi()
