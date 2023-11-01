@@ -348,8 +348,10 @@ def load_config():
                           config_data["client_key"])
             if config.wifi_ssid is None or config.wifi_pass is None:
                 report_error(Error.CONFIG_WIFI, "WiFi config missing from toml configuration.")
+                return None
             elif config.data_url is None or config.log_url is None or config.client_key is None:
                 report_error(Error.CONFIG_ENDPOINT, "Endpoint config missing from toml configuration.")
+                return None
 
             return config
     except:
