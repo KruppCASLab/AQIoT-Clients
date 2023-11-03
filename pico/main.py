@@ -212,11 +212,11 @@ class Services:
                 if int(response.status_code) != 200:
                     # TODO: Blink failure
                     log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                               "Error: Received unexpected response from server." + response.status_code + response.text)
+                               "Error: Received unexpected response from server." + str(response.status_code) + response.text)
                     response.close()
                 else:
                     # TODO: Blink success
-                    print("Success: Data sent to server.", response.status_code)
+                    print("Success: Data sent to server.", str(response.status_code))
                     response.close()
                     return True
             except RuntimeError as re:
@@ -324,7 +324,7 @@ def flush_log():
     print("Attempting to Flush Log List")
     success = []
     for log in log_list:
-        print("\tAttempting to send:", log)
+        print("\tAttempting to send log entry:", log)
         result = services.send_log_entry_to_server(log)
         if result == False:
             print("\tUnable to send log entry:", log)
