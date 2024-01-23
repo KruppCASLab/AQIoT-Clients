@@ -2,42 +2,47 @@
 MicroPython Version of Pico AQ Sensor
 MicroPython defaults to main.py
 """
-
+from typing import assert_never
+import json
+import struct
 import time
 import network
-import urequests
 import ubinascii
-import sys
-import struct
+import urequests
 from machine import Pin, UART
-import json
+from enum import Enum
 
 
-class NetworkStatus:
-    idle = 0
-    connecting = 1
-    no_ip = 2
-    wrong_password = -3
-    no_ap = -2
-    connect_fail = -1
-    connect_success = 3
+class NetworkStatus(Enum):
+    WRONG_PASSWORD = -3
+    NO_AP = -2
+    CONNECT_FAIL = -1
+    IDLE = 0
+    CONNECTING = 1
+    NO_IP = 2
+    CONNECT_SUCCESS = 3
 
-    string_status = {
-        idle : "Idle",
-        connecting : "Connecting",
-        no_ip: "No IP",
-        wrong_password : "Wrong Password",
-        no_ap : "Access Point Does Not Exist",
-        connect_fail : "Connect to Access Point Failed",
-        connect_success : "Connection Success"
-    }
+    def __str__(self) -> str:
+        match self:
+            case NetworkStatus.WRONG_PASSWORD:
+                return "Wrong password"
+            case NetworkStatus.NO_AP:
+                return "Access Point does not exist"
+            case NetworkStatus.CONNECT_FAIL:
+                return "Failed to connect to access point"
+            case NetworkStatus.IDLE:
+                return "Idle"
+            case NetworkStatus.CONNECTING:
+                return "Connecting"
+            case NetworkStatus.NO_IP:
+                return "No IP"
+            case NetworkStatus.CONNECT_SUCCESS:
+                return "Successfully connected"
+            case _:
+                assert_never(self.value)
 
-    @staticmethod
-    def return_string_status(code):
-        return NetworkStatus.string_status[code]
 
-
-class Error:
+class Error(Enum):
     CONFIG_WIFI = 1
     CONFIG_ENDPOINT = 2
     WIFI_FAILURE = 3
@@ -45,10 +50,11 @@ class Error:
 
 class ServerLogType:
     INFO = "INFO"
+    WARNING = "WARNING"
     ERROR = "ERROR"
 
 
-class ServerLogCode:
+class ServerLogCode(Enum):
     WIFI_CONNECT_SUCCESS = 30
     WIFI_CONNECT_FAILED = 4
     WIFI_SOCKET_POOL_HUMAN_ERROR = 5
@@ -69,7 +75,7 @@ class ServerLogCode:
 
 
 class Config:
-    def __init__(self, wifi_ssid: string, wifi_pass: string, data_url: string, log_url: string, client_key: string):
+    def __init__(self, wifi_ssid: str, wifi_pass: str, data_url: str, log_url: str, client_key: str):
         self.wifi_ssid = wifi_ssid
         self.wifi_pass = wifi_pass
         self.data_url = data_url
@@ -78,30 +84,30 @@ class Config:
 
 
 class AQData:
-    def __init__(self, pm10, pm25, pm100):
+    def __init__(self, pm10: str, pm25: str, pm100: str):
         self.pm10 = pm10
         self.pm25 = pm25
         self.pm100 = pm100
 
 
+def uart_create() -> UART | None:
+    try:
+        uart = UART(0, 9600, 8, None, 1, tx=Pin(0), rx=Pin(1))
+        uart.init()
+        return uart
+    except Exception as e:
+        log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_UART_FAIL, type(
+            e).__name__ + ": " + str(e))
+
+
 class Sensor:
     def __init__(self):
         self.buffer = bytearray(32)
-        self.uart = None
+        self.uart = uart_create()
         self.pm25 = None
 
         self.delay_between_attempts = 1
         self.max_attempts = 50
-
-        self.init_uart()
-
-    def init_uart(self):
-        try:
-            self.uart = UART(0, tx=Pin(0), rx=Pin(1))
-            self.uart.init(baudrate=9600, bits=8, parity=None, stop=1)
-        except Exception as e:
-            log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_UART_FAIL, type(e).__name__ + ": " + str(e))
-
 
     def read(self):
         # Use a dictionary to hold our data
@@ -123,6 +129,8 @@ class Sensor:
         for i in range(0, self.max_attempts):
             time.sleep(self.delay_between_attempts)
             try:
+                if self.uart == None:
+                    continue
                 byte = self.uart.read(1)
                 # If we did not get a byte or it doesn't match the header, continue to read
                 if not byte or byte[0] != 0x42:
@@ -194,15 +202,19 @@ class Services:
         self.delay_between_attempts = 1
         self.max_attempts = 5
 
-    def send_log_entry_to_server(self, log):
-        return self.send_data(config.log_url, log)
+    def send_log_entry_to_server(self, log) -> bool:
+        if config != None:
+            return self.send_data(config.log_url, log)
+        return False
 
-    def send_sensor_data_to_server(self, sensor_data: AQData):
+    def send_sensor_data_to_server(self, sensor_data: AQData) -> bool:
         json_data = {"pm25": sensor_data.pm25,
                      "pm10": sensor_data.pm10,
                      "pm100": sensor_data.pm100
                      }
-        return self.send_data(config.data_url, json_data)
+        if config != None:
+            return self.send_data(config.data_url, json_data)
+        return False
 
     def send_data(self, url, data):
         attempts = 1
@@ -212,11 +224,13 @@ class Services:
                 if int(response.status_code) != 200:
                     # TODO: Blink failure
                     log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                               "Error: Received unexpected response from server." + str(response.status_code) + response.text)
+                               "Error: Received unexpected response from server." + str(
+                                   response.status_code) + response.text)
                     response.close()
                 else:
                     # TODO: Blink success
-                    print("Success: Data sent to server.", str(response.status_code))
+                    print("Success: Data sent to server.",
+                          str(response.status_code))
                     response.close()
                     return True
             except RuntimeError as re:
@@ -226,7 +240,8 @@ class Services:
             except Exception as e:
                 log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
                            "Error: Exception in sending data to server. Exception: " + str(e))
-                print("Exception occurred in sending data to server:", type(e), str(e))
+                print("Exception occurred in sending data to server:",
+                      type(e), str(e))
                 attempts += 1
 
             attempts += 1
@@ -246,9 +261,14 @@ def connect_to_wifi(is_initial=True):
     delay = 1
     max_attempts = 25
 
+    if config == None:
+        report_error(Error.CONFIG_WIFI, "Config is None")
+        return
+
     print("Attempting to Connect to SSID:", config.wifi_ssid)
 
-    mac_address = ubinascii.hexlify(network.WLAN().config('mac'), ':').decode()
+    mac_address = ubinascii.hexlify(network.WLAN(
+        network.STA_IF).config('mac'), ':').decode()
     wlan.disconnect()
     wlan.connect(config.wifi_ssid, config.wifi_pass)
 
@@ -270,7 +290,8 @@ def connect_to_wifi(is_initial=True):
 
     else:
         if is_initial:
-            report_error(Error.WIFI_FAILURE, "Unable to make initial connection to WiFi")
+            report_error(Error.WIFI_FAILURE,
+                         "Unable to make initial connection to WiFi")
         elif attempts == max_attempts:
             log_create(ServerLogType.ERROR, ServerLogCode.WIFI_CONNECT_FAILED,
                        "Unable to connect to wifi after max attempts " + str(attempts))
@@ -297,13 +318,14 @@ def print_sensor_data(sensor_data: AQData):
     print("Sensor Reading:", sensor_data.pm25, "pm25")
 
 
-def flash_led(error_type: int):
-    for i in range(error_type):
+def flash_led(error_type: Error):
+    for _ in range(error_type.value):
         led.on()
         time.sleep(1)
         led.off()
         time.sleep(1)
-    time.sleep(3)  # Circuit python has 5-second delay between errors, must not use 5 as value
+    # Circuit python has 5-second delay between errors, must not use 5 as value
+    time.sleep(3)
 
 
 def flash_led_active():
@@ -314,9 +336,9 @@ def flash_led_active():
         time.sleep(0.1)
 
 
-def report_error(error_type, label):
+def report_error(error_type: Error, label: str):
     print("Error type:", error_type, label)
-    for i in range(5):
+    for _ in range(5):
         flash_led(error_type)
 
 
@@ -337,25 +359,28 @@ def flush_log():
         log_list.remove(log)
 
 
-def load_config():
+def load_config() -> Config | None:
     try:
         with open("config.json") as fd:
             config_data = json.load(fd)
             config = Config(config_data["wifi_ssid"],
-                          config_data["wifi_pass"],
-                          config_data["data_url"],
-                          config_data["log_url"],
-                          config_data["client_key"])
+                            config_data["wifi_pass"],
+                            config_data["data_url"],
+                            config_data["log_url"],
+                            config_data["client_key"])
             if config.wifi_ssid is None or config.wifi_pass is None:
-                report_error(Error.CONFIG_WIFI, "WiFi config missing from toml configuration.")
+                report_error(Error.CONFIG_WIFI,
+                             "WiFi config missing from toml configuration.")
                 return None
             elif config.data_url is None or config.log_url is None or config.client_key is None:
-                report_error(Error.CONFIG_ENDPOINT, "Endpoint config missing from toml configuration.")
+                report_error(Error.CONFIG_ENDPOINT,
+                             "Endpoint config missing from toml configuration.")
                 return None
 
             return config
     except:
-       return None
+        return None
+
 
 '''
 Variables for Main Execution
@@ -366,15 +391,11 @@ wlan.active(True)
 # Log list will hold a queue of logs to send to the server
 log_list = []
 
-# Config and network will be used globally, so declare here
-config = None
-services = None
-
 # Number of seconds between readings to report data
 delay = 60
 
 # Pin to use
-led = Pin("LED", machine.Pin.OUT)
+led = Pin("LED", Pin.OUT)
 led.on()
 
 '''
@@ -418,9 +439,9 @@ while True:
             print("Attempting next reading in", delay, "seconds")
             time.sleep(delay)
         else:
-            log_create(ServerLogType.INFO, ServerLogCode.WIFI_INITIAL_LOST, "Initial WiFi Lost - Reconnecting")
+            log_create(ServerLogType.INFO, ServerLogCode.WIFI_INITIAL_LOST,
+                       "Initial WiFi Lost - Reconnecting")
             services = Services(config)
     except Exception as e:
-        log_create(ServerLogType.ERROR, ServerLogCode.GENERAL_EXCEPTION, "An general exception occurred" + str(e) + type(e))
-
-
+        log_create(ServerLogType.ERROR, ServerLogCode.GENERAL_EXCEPTION,
+                   "An general exception occurred" + str(e) + str(type(e)))
