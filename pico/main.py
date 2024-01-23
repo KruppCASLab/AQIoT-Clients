@@ -13,33 +13,19 @@ from machine import Pin, UART
 from enum import Enum
 
 
-class NetworkStatus(Enum):
-    WRONG_PASSWORD = -3
-    NO_AP = -2
-    CONNECT_FAIL = -1
-    IDLE = 0
-    CONNECTING = 1
-    NO_IP = 2
-    CONNECT_SUCCESS = 3
-
-    def __str__(self) -> str:
-        match self:
-            case NetworkStatus.WRONG_PASSWORD:
-                return "Wrong password"
-            case NetworkStatus.NO_AP:
-                return "Access Point does not exist"
-            case NetworkStatus.CONNECT_FAIL:
-                return "Failed to connect to access point"
-            case NetworkStatus.IDLE:
-                return "Idle"
-            case NetworkStatus.CONNECTING:
-                return "Connecting"
-            case NetworkStatus.NO_IP:
-                return "No IP"
-            case NetworkStatus.CONNECT_SUCCESS:
-                return "Successfully connected"
-            case _:
-                assert_never(self.value)
+def network_status_str(value: int) -> str:
+    match value:
+        case network.STAT_IDLE:
+            return "Idle"
+        case network.STAT_CONNECTING:
+            return "Connecting"
+        case network.STAT_WRONG_PASSWORD:
+            return "Failed due to incorrect password"
+        case network.STAT_NO_AP_FOUND:
+            return "Failed due to no access point"
+        case network.STAT_CONNECT_FAIL:
+            return "Failed (generic)"
+    return "Unknown"
 
 
 class Error(Enum):
@@ -48,13 +34,15 @@ class Error(Enum):
     WIFI_FAILURE = 3
 
 
-class ServerLogType:
+# Corresponds to server log types
+class LogType:
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
 
 
-class ServerLogCode(Enum):
+# Corresponds to server log codes
+class LogCode(Enum):
     WIFI_CONNECT_SUCCESS = 30
     WIFI_CONNECT_FAILED = 4
     WIFI_SOCKET_POOL_HUMAN_ERROR = 5
@@ -90,20 +78,22 @@ class AQData:
         self.pm100 = pm100
 
 
-def uart_create() -> UART | None:
+def create_uart() -> UART | None:
     try:
-        uart = UART(0, 9600, 8, None, 1, tx=Pin(0), rx=Pin(1))
-        uart.init()
+        uart = UART(id=0)
+        uart.init(baudrate=9600, bits=8, parity=None,
+                  stop=1, tx=Pin(0), rx=Pin(1))
         return uart
     except Exception as e:
-        log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_UART_FAIL, type(
-            e).__name__ + ": " + str(e))
+        log(LogType.ERROR,
+            LogCode.SENSOR_UART_FAIL,
+            f'{type(e).__name__}: {e}')
 
 
 class Sensor:
     def __init__(self):
         self.buffer = bytearray(32)
-        self.uart = uart_create()
+        self.uart = create_uart()
         self.pm25 = None
 
         self.delay_between_attempts = 1
@@ -126,7 +116,7 @@ class Sensor:
             "particles 100um": None,
         }
 
-        for i in range(0, self.max_attempts):
+        for _ in range(0, self.max_attempts):
             time.sleep(self.delay_between_attempts)
             try:
                 if self.uart == None:
@@ -187,8 +177,8 @@ class Sensor:
                 print("Exception reading sensor: " + str(e) + ": retrying...")
                 time.sleep(self.delay_between_attempts)
 
-        log_create(ServerLogType.ERROR, ServerLogCode.SENSOR_PM25_READ_FAIL,
-                   "PM25 Read Failure: Reached Max Retry Count: " + str(self.max_attempts))
+        log(LogType.ERROR, LogCode.SENSOR_PM25_READ_FAIL,
+            "PM25 Read Failure: Reached Max Retry Count: " + str(self.max_attempts))
 
 
 class Services:
@@ -223,9 +213,9 @@ class Services:
                 response = urequests.post(url, json=data, headers=self.headers)
                 if int(response.status_code) != 200:
                     # TODO: Blink failure
-                    log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                               "Error: Received unexpected response from server." + str(
-                                   response.status_code) + response.text)
+                    log(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                        "Error: Received unexpected response from server." + str(
+                            response.status_code) + response.text)
                     response.close()
                 else:
                     # TODO: Blink success
@@ -234,12 +224,12 @@ class Services:
                     response.close()
                     return True
             except RuntimeError as re:
-                log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                           "Error: Timeout in sending data to server. Exception: " + str(re))
+                log(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                    "Error: Timeout in sending data to server. Exception: " + str(re))
                 attempts += 1
             except Exception as e:
-                log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED,
-                           "Error: Exception in sending data to server. Exception: " + str(e))
+                log(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                    "Error: Exception in sending data to server. Exception: " + str(e))
                 print("Exception occurred in sending data to server:",
                       type(e), str(e))
                 attempts += 1
@@ -248,12 +238,12 @@ class Services:
             time.sleep(self.delay_between_attempts)
 
         print("Max retry of sending reached")
-        log_create(ServerLogType.ERROR, ServerLogCode.DATA_POST_FAILED_MAX_RETRY,
-                   "Error: Max Retry Reached in Sending Data")
+        log(LogType.ERROR, LogCode.DATA_POST_FAILED_MAX_RETRY,
+            "Error: Max Retry Reached in Sending Data")
         return False
 
     def is_connected(self):
-        return wlan.status() == 3
+        return wlan.status() == network.STAT_GOT_IP
 
 
 def connect_to_wifi(is_initial=True):
@@ -276,16 +266,16 @@ def connect_to_wifi(is_initial=True):
         if wlan.status() == 3:
             break
         print("\tRetrying connection, Attempt:", str(attempts), "WLAN Status:",
-              NetworkStatus.return_string_status(wlan.status()))
+              network_status_str(wlan.status()))  # TODO: check if this prints right
         attempts += 1
         time.sleep(delay)
 
     if wlan.status() == 3:
         ip = wlan.ifconfig()[0]
         if is_initial:
-            log_create(ServerLogType.INFO, ServerLogCode.WIFI_CONNECT_SUCCESS,
-                       "Successfully Connected to the wifi. Mac: " + str(mac_address) + " IP: " +
-                       str(ip) + " | Attempt: " + str(attempts))
+            log(LogType.INFO, LogCode.WIFI_CONNECT_SUCCESS,
+                "Successfully Connected to the wifi. Mac: " + str(mac_address) + " IP: " +
+                str(ip) + " | Attempt: " + str(attempts))
         return True
 
     else:
@@ -293,16 +283,16 @@ def connect_to_wifi(is_initial=True):
             report_error(Error.WIFI_FAILURE,
                          "Unable to make initial connection to WiFi")
         elif attempts == max_attempts:
-            log_create(ServerLogType.ERROR, ServerLogCode.WIFI_CONNECT_FAILED,
-                       "Unable to connect to wifi after max attempts " + str(attempts))
+            log(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
+                "Unable to connect to wifi after max attempts " + str(attempts))
         else:
-            log_create(ServerLogType.ERROR, ServerLogCode.WIFI_CONNECT_FAILED,
-                       "Unable to connect to wifi wlan_status: " + str(wlan.status()) + " " +
-                       NetworkStatus.return_string_status(wlan.status()))
+            log(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
+                "Unable to connect to wifi wlan_status: " + str(wlan.status()) + " " +
+                network_status_str(wlan.status()))
         return False
 
 
-def log_create(log_type, code, string):
+def log(log_type, code, string):
     global services
     print("Log Created: ", log_type, code, string)
     log = {
@@ -318,8 +308,19 @@ def print_sensor_data(sensor_data: AQData):
     print("Sensor Reading:", sensor_data.pm25, "pm25")
 
 
-def flash_led(error_type: Error):
-    for _ in range(error_type.value):
+def flash_led_error(error_type: Error):
+    n_blinks = 0
+    match error_type:
+        case Error.CONFIG_WIFI:
+            n_blinks = 1
+        case Error.CONFIG_ENDPOINT:
+            n_blinks = 2
+        case Error.WIFI_FAILURE:
+            n_blinks = 3
+        case _:
+            assert_never(error_type)
+
+    for _ in range(n_blinks):
         led.on()
         time.sleep(1)
         led.off()
@@ -328,8 +329,9 @@ def flash_led(error_type: Error):
     time.sleep(3)
 
 
+# TODO: This seems to overlap with error blinking
 def flash_led_active():
-    for i in range(2):
+    for _ in range(2):
         led.on()
         time.sleep(0.1)
         led.off()
@@ -339,7 +341,7 @@ def flash_led_active():
 def report_error(error_type: Error, label: str):
     print("Error type:", error_type, label)
     for _ in range(5):
-        flash_led(error_type)
+        flash_led_error(error_type)
 
 
 def flush_log():
@@ -389,19 +391,19 @@ wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 
 # Log list will hold a queue of logs to send to the server
-log_list = []
+log_list = []  # TODO: type
 
 # Number of seconds between readings to report data
 delay = 60
 
 # Pin to use
-led = Pin("LED", Pin.OUT)
+led = Pin("LED", Pin.OUT)  # TODO: string for pin id?
 led.on()
 
 '''
 Main Execution
 '''
-log_create(ServerLogType.INFO, ServerLogCode.DEVICE_POWER_ON, "Pico Powered On")
+log(LogType.INFO, LogCode.DEVICE_POWER_ON, "Pico Powered On")
 config = load_config()
 while config is None:
     report_error(Error.CONFIG_WIFI, "None config returned")
@@ -424,7 +426,7 @@ while True:
         connected = connect_to_wifi(False)
         if connected:
             print("Network is connected.", "WLAN Status:",
-                  NetworkStatus.return_string_status(wlan.status()))
+                  network_status_str(wlan.status()))
             data = sensor.read()
             if data is None:
                 print("No sensor data was returned")
@@ -439,9 +441,8 @@ while True:
             print("Attempting next reading in", delay, "seconds")
             time.sleep(delay)
         else:
-            log_create(ServerLogType.INFO, ServerLogCode.WIFI_INITIAL_LOST,
-                       "Initial WiFi Lost - Reconnecting")
+            log(LogType.INFO, LogCode.WIFI_INITIAL_LOST,
+                "Initial WiFi Lost - Reconnecting")
             services = Services(config)
     except Exception as e:
-        log_create(ServerLogType.ERROR, ServerLogCode.GENERAL_EXCEPTION,
-                   "An general exception occurred" + str(e) + str(type(e)))
+        log(LogType.ERROR, LogCode.GENERAL_EXCEPTION, f'{type(e)}: {e}')
