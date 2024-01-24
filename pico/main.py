@@ -118,18 +118,18 @@ class AQData:
 
 
 def network_status_str(value: int) -> str:
-    match value:
-        case network.STAT_IDLE:
-            return "Idle"
-        case network.STAT_CONNECTING:
-            return "Connecting"
-        case network.STAT_WRONG_PASSWORD:
-            return "Failed due to incorrect password"
-        case network.STAT_NO_AP_FOUND:
-            return "Failed due to no access point"
-        case network.STAT_CONNECT_FAIL:
-            return "Failed (generic)"
-    return "Unknown"
+    if value == network.STAT_IDLE:
+        return "Idle"
+    elif value == network.STAT_CONNECTING:
+        return "Connecting"
+    elif value == network.STAT_WRONG_PASSWORD:
+        return "Failed due to incorrect password"
+    elif value == network.STAT_NO_AP_FOUND:
+        return "Failed due to no access point"
+    elif value == network.STAT_CONNECT_FAIL:
+        return "Failed (generic)"
+    else:
+        return "Unknown"
 
 
 class Sensor:
@@ -326,15 +326,14 @@ def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
 
 def flash_led_error(error_type: ClientError):
     n_blinks = 0
-    match error_type:
-        case ClientError.CONFIG_WIFI:
-            n_blinks = 1
-        case ClientError.CONFIG_ENDPOINT:
-            n_blinks = 2
-        case ClientError.WIFI_FAILURE:
-            n_blinks = 3
-        case _:
-            assert_never(error_type)
+    if error_type == ClientError.CONFIG_WIFI:
+        n_blinks = 1
+    elif error_type == ClientError.CONFIG_ENDPOINT:
+        n_blinks = 2
+    elif error_type == ClientError.WIFI_FAILURE:
+        n_blinks = 3
+    else:
+        assert_never(error_type)
 
     for _ in range(n_blinks):
         led.on()
