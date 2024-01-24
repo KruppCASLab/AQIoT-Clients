@@ -142,7 +142,7 @@ def network_status_str(value: int) -> str:
 class Sensor:
     def __init__(self):
         self.buffer = bytearray(32)
-        self.uart = create_uart()
+        self.uart = create_uart()  # TODO: Handle None case
         self.pm25 = None
 
         self.delay_between_attempts = 1
@@ -168,7 +168,7 @@ class Sensor:
         for _ in range(0, self.max_attempts):
             time.sleep(self.delay_between_attempts)
             try:
-                if self.uart == None:
+                if self.uart == None:  # TODO: Handle None case
                     continue
                 byte = self.uart.read(1)
                 # If we did not get a byte or it doesn't match the header, continue to read
