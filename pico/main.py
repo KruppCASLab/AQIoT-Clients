@@ -2,6 +2,7 @@
 MicroPython Version of Pico AQ Sensor
 MicroPython defaults to main.py
 """
+from __future__ import annotations
 from typing import assert_never
 import json
 import struct
@@ -13,25 +14,8 @@ from machine import Pin, UART
 from enum import Enum
 
 
-def network_status_str(value: int) -> str:
-    match value:
-        case network.STAT_IDLE:
-            return "Idle"
-        case network.STAT_CONNECTING:
-            return "Connecting"
-        case network.STAT_WRONG_PASSWORD:
-            return "Failed due to incorrect password"
-        case network.STAT_NO_AP_FOUND:
-            return "Failed due to no access point"
-        case network.STAT_CONNECT_FAIL:
-            return "Failed (generic)"
-    return "Unknown"
-
-
-class Error(Enum):
-    CONFIG_WIFI = 1
-    CONFIG_ENDPOINT = 2
-    WIFI_FAILURE = 3
+READINGS_DELAY_SECS = 60
+led = Pin("LED", Pin.OUT)  # TODO: string for pin id?
 
 
 # Corresponds to server log types
@@ -62,7 +46,57 @@ class LogCode(Enum):
     GENERAL_EXCEPTION = -9
 
 
-class Config:
+class Log:
+    def __init__(self, type: LogType, code: LogCode, message: str):
+        self.type = type
+        self.code = code
+        self.message = message
+
+    def __str__(self) -> str:
+        return f'{self.type} ({self.code}): {self.message}'
+
+
+class Logger:
+    _instance: Logger | None = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(Logger, cls).__new__(cls)
+            cls._instance._init()
+        return cls._instance
+
+    def _init(self):
+        self._log_queue: list[Log] = []
+
+    def queue(self, type: LogType, code: LogCode, message: str):
+        log = Log(type, code, message)
+        print(f'Queued log: {log}')
+        self._log_queue.append(log)
+
+    def flush_to_server(self, api: WebAPI):
+        print("Flushing logs to server...")
+        sent = []
+        for log in self._log_queue:
+            print("\tSending:", log)
+            result = api.send_log_entry_to_server(log)
+            if result == False:
+                print(f'\tFailed to send: {log}')
+            else:
+                print(f'\tSent: {log}')
+                sent.append(log)
+
+        # Remove the entries that were successful
+        for log in sent:
+            self._log_queue.remove(log)
+
+
+class ClientError(Enum):
+    CONFIG_WIFI = 1
+    CONFIG_ENDPOINT = 2
+    WIFI_FAILURE = 3
+
+
+class ClientConfig:
     def __init__(self, wifi_ssid: str, wifi_pass: str, data_url: str, log_url: str, client_key: str):
         self.wifi_ssid = wifi_ssid
         self.wifi_pass = wifi_pass
@@ -85,9 +119,24 @@ def create_uart() -> UART | None:
                   stop=1, tx=Pin(0), rx=Pin(1))
         return uart
     except Exception as e:
-        queue_log(LogType.ERROR,
-                  LogCode.SENSOR_UART_FAIL,
-                  f'{type(e).__name__}: {e}')
+        Logger().queue(LogType.ERROR,
+                       LogCode.SENSOR_UART_FAIL,
+                       f'{type(e).__name__}: {e}')
+
+
+def network_status_str(value: int) -> str:
+    match value:
+        case network.STAT_IDLE:
+            return "Idle"
+        case network.STAT_CONNECTING:
+            return "Connecting"
+        case network.STAT_WRONG_PASSWORD:
+            return "Failed due to incorrect password"
+        case network.STAT_NO_AP_FOUND:
+            return "Failed due to no access point"
+        case network.STAT_CONNECT_FAIL:
+            return "Failed (generic)"
+    return "Unknown"
 
 
 class Sensor:
@@ -143,10 +192,10 @@ class Sensor:
                     continue
 
                 '''
-                    The > is big endian
-                    H is for unsigned short
-                    https://docs.python.org/3.0/library/struct.html
-                    '''
+                The > is big endian
+                H is for unsigned short
+                https://docs.python.org/3.0/library/struct.html
+                '''
 
                 provided_checksum = struct.unpack(">H", self.buffer[30:32])[0]
                 computed_checksum = sum(self.buffer[0:30])
@@ -174,88 +223,84 @@ class Sensor:
                 return AQData(reading["pm10 env"], reading["pm25 env"], reading["pm100 env"])
 
             except Exception as e:
-                print("Exception reading sensor: " + str(e) + ": retrying...")
+                print(f'Exception reading sensor: {e}: retrying...')
                 time.sleep(self.delay_between_attempts)
 
-        queue_log(LogType.ERROR, LogCode.SENSOR_PM25_READ_FAIL,
-                  "PM25 Read Failure: Reached Max Retry Count: " + str(self.max_attempts))
+        Logger().queue(LogType.ERROR, LogCode.SENSOR_PM25_READ_FAIL,
+                       f'PM25 Read Failure: Reached Max Retry Count: {self.max_attempts}')
 
 
-class Services:
-    def __init__(self, config: Config):
-        self.headers = {
-            "Content-Type": "application/json",
-            "x-api-key": config.client_key
+class WebAPI:
+    def __init__(self, client_key: str, log_url: str, data_url: str):
+        self._headers = {
+            'Content-Type': 'application/json',
+            'x-api-key': client_key
         }
-        self.config = config
-
-        self.delay_between_attempts = 1
-        self.max_attempts = 5
+        self._log_url = log_url
+        self._data_url = data_url
+        self._delay_between_attempts = 1
+        self._max_attempts = 5
 
     def send_log_entry_to_server(self, log) -> bool:
-        if config != None:
-            return self.send_data(config.log_url, log)
-        return False
+        return self._send_data(self._log_url, log)
 
     def send_sensor_data_to_server(self, sensor_data: AQData) -> bool:
         json_data = {"pm25": sensor_data.pm25,
                      "pm10": sensor_data.pm10,
                      "pm100": sensor_data.pm100
                      }
-        if config != None:
-            return self.send_data(config.data_url, json_data)
-        return False
+        return self._send_data(self._data_url, json_data)
 
-    def send_data(self, url, data):
+    def _send_data(self, url, data):
         attempts = 1
-        while attempts <= self.max_attempts:
+        while attempts <= self._max_attempts:
             try:
-                response = urequests.post(url, json=data, headers=self.headers)
+                response = urequests.post(
+                    url, json=data, headers=self._headers)
                 if int(response.status_code) != 200:
                     # TODO: Blink failure
-                    queue_log(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                              "Error: Received unexpected response from server." + str(
-                                  response.status_code) + response.text)
+                    Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                                   f'Error: Received unexpected response from server: {response.status_code}: {response.text}')
                     response.close()
                 else:
                     # TODO: Blink success
-                    print("Success: Data sent to server.",
-                          str(response.status_code))
+                    print(
+                        f'Success: Data sent to server: {response.status_code}')
                     response.close()
                     return True
             except RuntimeError as re:
-                queue_log(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                          "Error: Timeout in sending data to server. Exception: " + str(re))
+                Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                               f'Error: Timeout in sending data to server. Exception: {re}')
                 attempts += 1
             except Exception as e:
-                queue_log(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                          "Error: Exception in sending data to server. Exception: " + str(e))
-                print("Exception occurred in sending data to server:",
-                      type(e), str(e))
+                Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                               f'Error: Exception in sending data to server. Exception: {e}')
+                print(
+                    f'Exception occurred in sending data to server: {type(e)}: {e}')
                 attempts += 1
 
             attempts += 1
-            time.sleep(self.delay_between_attempts)
+            time.sleep(self._delay_between_attempts)
 
-        print("Max retry of sending reached")
-        queue_log(LogType.ERROR, LogCode.DATA_POST_FAILED_MAX_RETRY,
-                  "Error: Max Retry Reached in Sending Data")
+        print('Max retry of sending reached')
+        Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED_MAX_RETRY,
+                       'Error: Max Retry Reached in Sending Data')
         return False
 
-    def is_connected(self):
+    def is_connected(self, wlan: network.WLAN):
         return wlan.status() == network.STAT_GOT_IP
 
 
-def connect_to_wifi(is_initial=True):
+def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
     attempts = 1
     delay = 1
     max_attempts = 25
 
     if config == None:
-        report_error(Error.CONFIG_WIFI, "Config is None")
+        client_error(ClientError.CONFIG_WIFI, "Config is None")
         return
 
-    print("Attempting to Connect to SSID:", config.wifi_ssid)
+    print(f'Attempting to Connect to SSID: {config.wifi_ssid}')
 
     mac_address = ubinascii.hexlify(network.WLAN(
         network.STA_IF).config('mac'), ':').decode()
@@ -265,62 +310,40 @@ def connect_to_wifi(is_initial=True):
     while attempts <= max_attempts:
         if wlan.status() == 3:
             break
-        print("\tRetrying connection, Attempt:", str(attempts), "WLAN Status:",
-              network_status_str(wlan.status()))  # TODO: check if this prints right
+        # TODO: check if this prints right
+        print(
+            f'\tRetrying connection, Attempt: {attempts} WLAN Status: {network_status_str(wlan.status())}')
         attempts += 1
         time.sleep(delay)
 
     if wlan.status() == 3:
         ip = wlan.ifconfig()[0]
         if is_initial:
-            queue_log(LogType.INFO, LogCode.WIFI_CONNECT_SUCCESS,
-                      "Successfully Connected to the wifi. Mac: " + str(mac_address) + " IP: " +
-                      str(ip) + " | Attempt: " + str(attempts))
+            Logger().queue(LogType.INFO, LogCode.WIFI_CONNECT_SUCCESS,
+                           f'Successfully Connected to the wifi. Mac: {mac_address} IP: {ip} | Attempt: {attempts}')
         return True
 
     else:
         if is_initial:
-            report_error(Error.WIFI_FAILURE,
+            client_error(ClientError.WIFI_FAILURE,
                          "Unable to make initial connection to WiFi")
         elif attempts == max_attempts:
-            queue_log(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
-                      "Unable to connect to wifi after max attempts " + str(attempts))
+            Logger().queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
+                           f'Unable to connect to wifi after max attempts {attempts}')
         else:
-            queue_log(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
-                      "Unable to connect to wifi wlan_status: " + str(wlan.status()) + " " +
-                      network_status_str(wlan.status()))
+            Logger().queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
+                           f'Unable to connect to wifi wlan_status: {wlan.status()}: {network_status_str(wlan.status())}')
         return False
 
 
-class Log:
-    def __init__(self, type: LogType, code: LogCode, message: str):
-        self.type = type
-        self.code = code
-        self.message = message
-
-    def __str__(self) -> str:
-        return f'{self.type} ({self.code}): {self.message}'
-
-
-def queue_log(type: LogType, code: LogCode, message: str):
-    global services
-    log = Log(type, code, message)
-    print(f'Log Created: {log}')
-    log_send_queue.append(log)
-
-
-def print_sensor_data(sensor_data: AQData):
-    print("Sensor Reading:", sensor_data.pm25, "pm25")
-
-
-def flash_led_error(error_type: Error):
+def flash_led_error(error_type: ClientError):
     n_blinks = 0
     match error_type:
-        case Error.CONFIG_WIFI:
+        case ClientError.CONFIG_WIFI:
             n_blinks = 1
-        case Error.CONFIG_ENDPOINT:
+        case ClientError.CONFIG_ENDPOINT:
             n_blinks = 2
-        case Error.WIFI_FAILURE:
+        case ClientError.WIFI_FAILURE:
             n_blinks = 3
         case _:
             assert_never(error_type)
@@ -343,44 +366,27 @@ def flash_led_active():
         time.sleep(0.1)
 
 
-def report_error(error_type: Error, label: str):
-    print("Error type:", error_type, label)
+def client_error(error_type: ClientError, label: str):
+    print(f'Error type: {error_type}: {label}')
     for _ in range(5):
         flash_led_error(error_type)
 
 
-def flush_log():
-    print("Attempting to Flush Log List")
-    success = []
-    for log in log_send_queue:
-        print("\tAttempting to send log entry:", log)
-        result = services.send_log_entry_to_server(log)
-        if result == False:
-            print("\tUnable to send log entry:", log)
-        else:
-            print("\tSent log entry", log)
-            success.append(log)
-
-    # Remove the entries that were successful
-    for log in success:
-        log_send_queue.remove(log)
-
-
-def load_config() -> Config | None:
+def load_client_config() -> ClientConfig | None:
     try:
         with open("config.json") as fd:
             config_data = json.load(fd)
-            config = Config(config_data["wifi_ssid"],
-                            config_data["wifi_pass"],
-                            config_data["data_url"],
-                            config_data["log_url"],
-                            config_data["client_key"])
+            config = ClientConfig(config_data["wifi_ssid"],
+                                  config_data["wifi_pass"],
+                                  config_data["data_url"],
+                                  config_data["log_url"],
+                                  config_data["client_key"])
             if config.wifi_ssid is None or config.wifi_pass is None:
-                report_error(Error.CONFIG_WIFI,
+                client_error(ClientError.CONFIG_WIFI,
                              "WiFi config missing from toml configuration.")
                 return None
             elif config.data_url is None or config.log_url is None or config.client_key is None:
-                report_error(Error.CONFIG_ENDPOINT,
+                client_error(ClientError.CONFIG_ENDPOINT,
                              "Endpoint config missing from toml configuration.")
                 return None
 
@@ -389,64 +395,55 @@ def load_config() -> Config | None:
         return None
 
 
-'''
-Variables for Main Execution
-'''
-wlan = network.WLAN(network.STA_IF)
-wlan.active(True)
+def main():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
 
-log_send_queue: list[Log] = []
+    led.on()
 
-# Number of seconds between readings to report data
-delay = 60
+    Logger().queue(LogType.INFO, LogCode.DEVICE_POWER_ON, "Pico Powered On")
+    config = load_client_config()
+    while config is None:
+        client_error(ClientError.CONFIG_WIFI, "Config is None")
+        config = load_client_config()
 
-# Pin to use
-led = Pin("LED", Pin.OUT)  # TODO: string for pin id?
-led.on()
+    # Initialize wifi, network, and sensor
+    while True:
+        connect_success = connect_to_wifi(config, wlan)
+        if connect_success:
+            break
 
-'''
-Main Execution
-'''
-queue_log(LogType.INFO, LogCode.DEVICE_POWER_ON, "Pico Powered On")
-config = load_config()
-while config is None:
-    report_error(Error.CONFIG_WIFI, "None config returned")
-    config = load_config()
+    api = WebAPI(config.client_key, config.log_url, config.data_url)
+    Logger().flush_to_server(api)
+    sensor = Sensor()
 
-# Initialize wifi, network, and sensor
-while True:
-    connect_success = connect_to_wifi()
-    if connect_success:
-        break
+    # Read sensor and post data to server
+    while True:
+        try:
+            flash_led_active()
+            connected = connect_to_wifi(config, wlan, False)
+            if connected:
+                print(
+                    f'Network is connected: WLAN Status: {network_status_str(wlan.status())}')
+                data = sensor.read()
+                if data is None:
+                    print("No sensor data was returned")
+                    continue
+                print(f'Sensor data received: {data.pm25}')
+                api.send_sensor_data_to_server(data)
 
-services = Services(config)
-flush_log()
-sensor = Sensor()
+                Logger().flush_to_server(api)
 
-# Read sensor and post data to server
-while True:
-    try:
-        flash_led_active()
-        connected = connect_to_wifi(False)
-        if connected:
-            print("Network is connected.", "WLAN Status:",
-                  network_status_str(wlan.status()))
-            data = sensor.read()
-            if data is None:
-                print("No sensor data was returned")
-                continue
-            print("Sensor data received:", data.pm25)
-            print_sensor_data(data)
-            services.send_sensor_data_to_server(data)
+                print(f'Attempting next reading in {READINGS_DELAY_SECS} secs')
+                time.sleep(READINGS_DELAY_SECS)
+            else:
+                Logger().queue(LogType.INFO, LogCode.WIFI_INITIAL_LOST,
+                               "Initial WiFi Lost - Reconnecting")
+                api = WebAPI(config.client_key,
+                             config.log_url, config.data_url)
+        except Exception as e:
+            Logger().queue(LogType.ERROR, LogCode.GENERAL_EXCEPTION,
+                           f'{type(e)}: {e}')
 
-            # Make sure any log entries are sent
-            flush_log()
 
-            print("Attempting next reading in", delay, "seconds")
-            time.sleep(delay)
-        else:
-            queue_log(LogType.INFO, LogCode.WIFI_INITIAL_LOST,
-                      "Initial WiFi Lost - Reconnecting")
-            services = Services(config)
-    except Exception as e:
-        queue_log(LogType.ERROR, LogCode.GENERAL_EXCEPTION, f'{type(e)}: {e}')
+main()
