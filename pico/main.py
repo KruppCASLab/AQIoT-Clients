@@ -2,8 +2,6 @@
 MicroPython Version of Pico AQ Sensor
 MicroPython defaults to main.py
 """
-from __future__ import annotations
-from typing import assert_never
 import json
 import struct
 import time
@@ -11,7 +9,6 @@ import network
 import ubinascii
 import urequests
 from machine import Pin, UART
-from enum import Enum
 
 
 READINGS_DELAY_SECS = 60
@@ -24,14 +21,14 @@ led = Pin("LED", Pin.OUT)  # TODO: string for pin id?
 
 
 # Corresponds to server log types
-class LogType(Enum):
+class LogType:
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
 
 
 # Corresponds to server log codes
-class LogCode(Enum):
+class LogCode:
     WIFI_CONNECT_SUCCESS = 30
     WIFI_CONNECT_FAILED = 4
     WIFI_SOCKET_POOL_HUMAN_ERROR = 5
@@ -52,7 +49,7 @@ class LogCode(Enum):
 
 
 class Log:
-    def __init__(self, type: LogType, code: LogCode, message: str):
+    def __init__(self, type: str, code: int, message: str):
         self.type = type
         self.code = code
         self.message = message
@@ -61,8 +58,79 @@ class Log:
         return f'{self.type} ({self.code}): {self.message}'
 
 
+class AQData:
+    def __init__(self, pm10: str, pm25: str, pm100: str):
+        self.pm10 = pm10
+        self.pm25 = pm25
+        self.pm100 = pm100
+
+
+class WebAPI:
+    def __init__(self, client_key: str, log_url: str, data_url: str):
+        self._client_key = client_key
+        self._log_url = log_url
+        self._data_url = data_url
+
+    def send_log_entry_to_server(self, log: Log) -> bool:
+        return self._send_data(self._log_url, {
+            "type": log.type,
+            "code": log.code,
+            "message": log.message
+        })
+
+    def send_sensor_data_to_server(self, sensor_data: AQData) -> bool:
+        json_data = {"pm25": sensor_data.pm25,
+                     "pm10": sensor_data.pm10,
+                     "pm100": sensor_data.pm100
+                     }
+        return self._send_data(self._data_url, json_data)
+
+    def _send_data(self, url: str, data: object):
+        attempts = 1
+        while attempts <= WEB_API_MAX_ATTEMPTS:
+            try:
+                response = urequests.post(url,
+                                          headers={
+                                              'Content-Type': 'application/json',
+                                              'x-api-key': self._client_key
+                                          },
+                                          data=json.dumps(data))
+                if int(response.status_code) != 200:
+                    # TODO: Blink failure
+                    Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                                   f'Error: Received unexpected response from server: {response.status_code}: {response.text}')
+                    response.close()
+                else:
+                    # TODO: Blink success
+                    print(
+                        f'Success: Data sent to server: {response.status_code}')
+                    response.close()
+                    return True
+            except RuntimeError as re:
+                Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                               f'Error: Timeout in sending data to server. Exception: {re}')
+                attempts += 1
+            except Exception as e:
+                Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
+                               f'Error: Exception in sending data to server. Exception: {e}')
+                print(
+                    f'Exception occurred in sending data to server: {type(e)}: {e}')
+                attempts += 1
+
+            attempts += 1
+            time.sleep(WEB_API_REQUESTS_DELAY_SECS)
+
+        print('Max retry of sending reached')
+        Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED_MAX_RETRY,
+                       'Error: Max Retry Reached in Sending Data')
+        return False
+
+    def is_connected(self, wlan: network.WLAN):
+        return wlan.status() == network.STAT_GOT_IP
+
+
 class Logger:
-    _instance: Logger | None = None
+    _instance = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -73,7 +141,7 @@ class Logger:
     def _init(self):
         self._log_queue: list[Log] = []
 
-    def queue(self, type: LogType, code: LogCode, message: str):
+    def queue(self, type: str, code: int, message: str):
         log = Log(type, code, message)
         print(f'Queued log: {log}')
         self._log_queue.append(log)
@@ -95,7 +163,7 @@ class Logger:
             self._log_queue.remove(log)
 
 
-class ClientError(Enum):
+class ClientError:
     CONFIG_WIFI = 1
     CONFIG_ENDPOINT = 2
     WIFI_FAILURE = 3
@@ -108,13 +176,6 @@ class ClientConfig:
         self.data_url = data_url
         self.log_url = log_url
         self.client_key = client_key
-
-
-class AQData:
-    def __init__(self, pm10: str, pm25: str, pm100: str):
-        self.pm10 = pm10
-        self.pm25 = pm25
-        self.pm100 = pm100
 
 
 def network_status_str(value: int) -> str:
@@ -221,65 +282,6 @@ class Sensor:
                        f'PM25 Read Failure: Reached Max Retry Count: {SENSOR_READ_MAX_ATTEMPTS}')
 
 
-class WebAPI:
-    def __init__(self, client_key: str, log_url: str, data_url: str):
-        self._headers = {
-            'Content-Type': 'application/json',
-            'x-api-key': client_key
-        }
-        self._log_url = log_url
-        self._data_url = data_url
-
-    def send_log_entry_to_server(self, log) -> bool:
-        return self._send_data(self._log_url, log)
-
-    def send_sensor_data_to_server(self, sensor_data: AQData) -> bool:
-        json_data = {"pm25": sensor_data.pm25,
-                     "pm10": sensor_data.pm10,
-                     "pm100": sensor_data.pm100
-                     }
-        return self._send_data(self._data_url, json_data)
-
-    def _send_data(self, url, data):
-        attempts = 1
-        while attempts <= WEB_API_MAX_ATTEMPTS:
-            try:
-                response = urequests.post(
-                    url, json=data, headers=self._headers)
-                if int(response.status_code) != 200:
-                    # TODO: Blink failure
-                    Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                                   f'Error: Received unexpected response from server: {response.status_code}: {response.text}')
-                    response.close()
-                else:
-                    # TODO: Blink success
-                    print(
-                        f'Success: Data sent to server: {response.status_code}')
-                    response.close()
-                    return True
-            except RuntimeError as re:
-                Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                               f'Error: Timeout in sending data to server. Exception: {re}')
-                attempts += 1
-            except Exception as e:
-                Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                               f'Error: Exception in sending data to server. Exception: {e}')
-                print(
-                    f'Exception occurred in sending data to server: {type(e)}: {e}')
-                attempts += 1
-
-            attempts += 1
-            time.sleep(WEB_API_REQUESTS_DELAY_SECS)
-
-        print('Max retry of sending reached')
-        Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED_MAX_RETRY,
-                       'Error: Max Retry Reached in Sending Data')
-        return False
-
-    def is_connected(self, wlan: network.WLAN):
-        return wlan.status() == network.STAT_GOT_IP
-
-
 def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
     attempts = 1
     delay = 1
@@ -324,7 +326,7 @@ def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
         return False
 
 
-def flash_led_error(error_type: ClientError):
+def flash_led_error(error_type: int):
     n_blinks = 0
     if error_type == ClientError.CONFIG_WIFI:
         n_blinks = 1
@@ -332,8 +334,6 @@ def flash_led_error(error_type: ClientError):
         n_blinks = 2
     elif error_type == ClientError.WIFI_FAILURE:
         n_blinks = 3
-    else:
-        assert_never(error_type)
 
     for _ in range(n_blinks):
         led.on()
@@ -353,10 +353,10 @@ def flash_led_active():
         time.sleep(0.1)
 
 
-def client_error(error_type: ClientError, label: str):
-    print(f'Error type: {error_type}: {label}')
+def client_error(client_error: int, label: str):
+    print(f'Error type: {client_error}: {label}')
     for _ in range(5):
-        flash_led_error(error_type)
+        flash_led_error(client_error)
 
 
 def load_client_config() -> ClientConfig | None:
