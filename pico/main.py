@@ -112,18 +112,6 @@ class AQData:
         self.pm100 = pm100
 
 
-def create_uart() -> UART | None:
-    try:
-        uart = UART(id=0)
-        uart.init(baudrate=9600, bits=8, parity=None,
-                  stop=1, tx=Pin(0), rx=Pin(1))
-        return uart
-    except Exception as e:
-        Logger().queue(LogType.ERROR,
-                       LogCode.SENSOR_UART_FAIL,
-                       f'{type(e).__name__}: {e}')
-
-
 def network_status_str(value: int) -> str:
     match value:
         case network.STAT_IDLE:
@@ -141,12 +129,14 @@ def network_status_str(value: int) -> str:
 
 class Sensor:
     def __init__(self):
-        self.buffer = bytearray(32)
-        self.uart = create_uart()  # TODO: Handle None case
-        self.pm25 = None
+        self._buffer = bytearray(32)
+        self._uart = UART(id=0)
+        self._pm25 = None
+        self._delay_between_attempts = 1
+        self._max_attempts = 50
 
-        self.delay_between_attempts = 1
-        self.max_attempts = 50
+        self._uart.init(baudrate=9600, bits=8, parity=None,
+                        stop=1, tx=Pin(0), rx=Pin(1))
 
     def read(self):
         # Use a dictionary to hold our data
@@ -165,27 +155,27 @@ class Sensor:
             "particles 100um": None,
         }
 
-        for _ in range(0, self.max_attempts):
-            time.sleep(self.delay_between_attempts)
+        for _ in range(0, self._max_attempts):
+            time.sleep(self._delay_between_attempts)
             try:
-                if self.uart == None:  # TODO: Handle None case
+                if self._uart == None:  # TODO: Handle None case
                     continue
-                byte = self.uart.read(1)
+                byte = self._uart.read(1)
                 # If we did not get a byte or it doesn't match the header, continue to read
                 if not byte or byte[0] != 0x42:
                     continue
 
                 # Save the byte and read the remaining
-                self.buffer[0] = byte[0]
-                remaining_bytes = self.uart.read(31)
+                self._buffer[0] = byte[0]
+                remaining_bytes = self._uart.read(31)
 
                 # If we don't have any remaining bytes, or our length is not 31 (not a full message), continue
                 if not remaining_bytes or len(remaining_bytes) != 31:
                     continue
 
                 # If we get this far, we have a full message, unpack
-                self.buffer[1:] = remaining_bytes
-                frame_len = struct.unpack(">H", self.buffer[2:4])[0]
+                self._buffer[1:] = remaining_bytes
+                frame_len = struct.unpack(">H", self._buffer[2:4])[0]
 
                 # Check for invalid frame length
                 if frame_len != 28:
@@ -197,8 +187,8 @@ class Sensor:
                 https://docs.python.org/3.0/library/struct.html
                 '''
 
-                provided_checksum = struct.unpack(">H", self.buffer[30:32])[0]
-                computed_checksum = sum(self.buffer[0:30])
+                provided_checksum = struct.unpack(">H", self._buffer[30:32])[0]
+                computed_checksum = sum(self._buffer[0:30])
 
                 # If checksum does not match, continue
                 if computed_checksum != provided_checksum:
@@ -218,16 +208,16 @@ class Sensor:
                     reading["particles 25um"],
                     reading["particles 50um"],
                     reading["particles 100um"],
-                ) = struct.unpack(">HHHHHHHHHHHH", self.buffer[4:28])
+                ) = struct.unpack(">HHHHHHHHHHHH", self._buffer[4:28])
 
                 return AQData(reading["pm10 env"], reading["pm25 env"], reading["pm100 env"])
 
             except Exception as e:
                 print(f'Exception reading sensor: {e}: retrying...')
-                time.sleep(self.delay_between_attempts)
+                time.sleep(self._delay_between_attempts)
 
         Logger().queue(LogType.ERROR, LogCode.SENSOR_PM25_READ_FAIL,
-                       f'PM25 Read Failure: Reached Max Retry Count: {self.max_attempts}')
+                       f'PM25 Read Failure: Reached Max Retry Count: {self._max_attempts}')
 
 
 class WebAPI:
@@ -415,7 +405,16 @@ def main():
 
     api = WebAPI(config.client_key, config.log_url, config.data_url)
     Logger().flush_to_server(api)
-    sensor = Sensor()
+
+    while True:
+        try:
+            sensor = Sensor()
+            break
+        except Exception as e:
+            Logger().queue(LogType.ERROR,
+                           LogCode.SENSOR_UART_FAIL,    # TODO: Not quite the right category
+                           f'{type(e).__name__}: {e} | Trying again...')
+            time.sleep(5)
 
     # Read sensor and post data to server
     while True:
