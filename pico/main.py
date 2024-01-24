@@ -131,7 +131,6 @@ class Sensor:
     def __init__(self):
         self._buffer = bytearray(32)
         self._uart = UART(id=0)
-        self._pm25 = None
         self._delay_between_attempts = 1
         self._max_attempts = 50
 
@@ -158,8 +157,6 @@ class Sensor:
         for _ in range(0, self._max_attempts):
             time.sleep(self._delay_between_attempts)
             try:
-                if self._uart == None:  # TODO: Handle None case
-                    continue
                 byte = self._uart.read(1)
                 # If we did not get a byte or it doesn't match the header, continue to read
                 if not byte or byte[0] != 0x42:
