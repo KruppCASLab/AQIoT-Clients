@@ -15,6 +15,11 @@ from enum import Enum
 
 
 READINGS_DELAY_SECS = 60
+SENSOR_READ_MAX_ATTEMPTS = 50
+WEB_API_REQUESTS_DELAY_SECS = 1
+WEB_API_MAX_ATTEMPTS = 5
+WIFI_CONNECT_MAX_ATTEMPTS = 25
+
 led = Pin("LED", Pin.OUT)  # TODO: string for pin id?
 
 
@@ -132,7 +137,6 @@ class Sensor:
         self._buffer = bytearray(32)
         self._uart = UART(id=0)
         self._delay_between_attempts = 1
-        self._max_attempts = 50
 
         self._uart.init(baudrate=9600, bits=8, parity=None,
                         stop=1, tx=Pin(0), rx=Pin(1))
@@ -154,7 +158,7 @@ class Sensor:
             "particles 100um": None,
         }
 
-        for _ in range(0, self._max_attempts):
+        for _ in range(0, SENSOR_READ_MAX_ATTEMPTS):
             time.sleep(self._delay_between_attempts)
             try:
                 byte = self._uart.read(1)
@@ -214,7 +218,7 @@ class Sensor:
                 time.sleep(self._delay_between_attempts)
 
         Logger().queue(LogType.ERROR, LogCode.SENSOR_PM25_READ_FAIL,
-                       f'PM25 Read Failure: Reached Max Retry Count: {self._max_attempts}')
+                       f'PM25 Read Failure: Reached Max Retry Count: {SENSOR_READ_MAX_ATTEMPTS}')
 
 
 class WebAPI:
@@ -225,8 +229,6 @@ class WebAPI:
         }
         self._log_url = log_url
         self._data_url = data_url
-        self._delay_between_attempts = 1
-        self._max_attempts = 5
 
     def send_log_entry_to_server(self, log) -> bool:
         return self._send_data(self._log_url, log)
@@ -240,7 +242,7 @@ class WebAPI:
 
     def _send_data(self, url, data):
         attempts = 1
-        while attempts <= self._max_attempts:
+        while attempts <= WEB_API_MAX_ATTEMPTS:
             try:
                 response = urequests.post(
                     url, json=data, headers=self._headers)
@@ -267,7 +269,7 @@ class WebAPI:
                 attempts += 1
 
             attempts += 1
-            time.sleep(self._delay_between_attempts)
+            time.sleep(WEB_API_REQUESTS_DELAY_SECS)
 
         print('Max retry of sending reached')
         Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED_MAX_RETRY,
@@ -281,7 +283,6 @@ class WebAPI:
 def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
     attempts = 1
     delay = 1
-    max_attempts = 25
 
     if config == None:
         client_error(ClientError.CONFIG_WIFI, "Config is None")
@@ -294,8 +295,8 @@ def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
     wlan.disconnect()
     wlan.connect(config.wifi_ssid, config.wifi_pass)
 
-    while attempts <= max_attempts:
-        if wlan.status() == 3:
+    while attempts <= WIFI_CONNECT_MAX_ATTEMPTS:
+        if wlan.status() == network.STAT_GOT_IP:
             break
         # TODO: check if this prints right
         print(
@@ -303,7 +304,7 @@ def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
         attempts += 1
         time.sleep(delay)
 
-    if wlan.status() == 3:
+    if wlan.status() == network.STAT_GOT_IP:
         ip = wlan.ifconfig()[0]
         if is_initial:
             Logger().queue(LogType.INFO, LogCode.WIFI_CONNECT_SUCCESS,
@@ -314,7 +315,7 @@ def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
         if is_initial:
             client_error(ClientError.WIFI_FAILURE,
                          "Unable to make initial connection to WiFi")
-        elif attempts == max_attempts:
+        elif attempts == WIFI_CONNECT_MAX_ATTEMPTS:
             Logger().queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
                            f'Unable to connect to wifi after max attempts {attempts}')
         else:
