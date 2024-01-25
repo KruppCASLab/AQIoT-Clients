@@ -8,6 +8,7 @@ import time
 import network
 import ubinascii
 import urequests
+import gc
 from machine import Pin, UART
 
 
@@ -21,6 +22,7 @@ led = Pin("LED", Pin.OUT)  # TODO: string for pin id?
 
 
 # Corresponds to server log types
+# unsupported inheriting from `Enum` in micropython
 class LogType:
     INFO = "INFO"
     WARNING = "WARNING"
@@ -28,6 +30,7 @@ class LogType:
 
 
 # Corresponds to server log codes
+# unsupported inheriting from `Enum` in micropython
 class LogCode:
     WIFI_CONNECT_SUCCESS = 30
     WIFI_CONNECT_FAILED = 4
@@ -46,6 +49,7 @@ class LogCode:
     DEVICE_POWER_ON = 31
     WIFI_INITIAL_LOST = 44
     GENERAL_EXCEPTION = -9
+    FREE_MEMORY_STATUS = 60
 
 
 class Log:
@@ -71,18 +75,19 @@ class WebAPI:
         self._log_url = log_url
         self._data_url = data_url
 
-    def send_log_entry_to_server(self, log: Log) -> bool:
+    def send_log(self, log: Log) -> bool:
         return self._send_data(self._log_url, {
-            "type": log.type,
-            "code": log.code,
-            "message": log.message
+            'type': log.type,
+            'code': log.code,
+            'message': log.message
         })
 
-    def send_sensor_data_to_server(self, sensor_data: AQData) -> bool:
-        json_data = {"pm25": sensor_data.pm25,
-                     "pm10": sensor_data.pm10,
-                     "pm100": sensor_data.pm100
-                     }
+    def send_aq(self, sensor_data: AQData) -> bool:
+        json_data = {
+            'pm25': sensor_data.pm25,
+            'pm10': sensor_data.pm10,
+            'pm100': sensor_data.pm100
+        }
         return self._send_data(self._data_url, json_data)
 
     def _send_data(self, url: str, data: object):
@@ -130,6 +135,7 @@ class WebAPI:
 
 
 class Logger:
+    # Logger | None (unsupported `from __future__ import annotations` in micropython)
     _instance = None
 
     def __new__(cls):
@@ -151,7 +157,7 @@ class Logger:
         sent = []
         for log in self._log_queue:
             print("\tSending:", log)
-            result = api.send_log_entry_to_server(log)
+            result = api.send_log(log)
             if result == False:
                 print(f'\tFailed to send: {log}')
             else:
@@ -161,6 +167,8 @@ class Logger:
         # Remove the entries that were successful
         for log in sent:
             self._log_queue.remove(log)
+
+# unsupported inheriting from `Enum` in micropython
 
 
 class ClientError:
@@ -179,6 +187,7 @@ class ClientConfig:
 
 
 def network_status_str(value: int) -> str:
+    # unsupported `match` in micropython
     if value == network.STAT_IDLE:
         return "Idle"
     elif value == network.STAT_CONNECTING:
@@ -196,7 +205,7 @@ def network_status_str(value: int) -> str:
 class Sensor:
     def __init__(self):
         self._buffer = bytearray(32)
-        self._uart = UART(id=0)
+        self._uart = UART(0)
         self._delay_between_attempts = 1
 
         self._uart.init(baudrate=9600, bits=8, parity=None,
@@ -258,18 +267,18 @@ class Sensor:
 
                 # If we get this far, we have a valid frame length and checksum, unpack data and return
                 (
-                    reading["pm10 standard"],
-                    reading["pm25 standard"],
-                    reading["pm100 standard"],
-                    reading["pm10 env"],
-                    reading["pm25 env"],
-                    reading["pm100 env"],
-                    reading["particles 03um"],
-                    reading["particles 05um"],
-                    reading["particles 10um"],
-                    reading["particles 25um"],
-                    reading["particles 50um"],
-                    reading["particles 100um"],
+                    reading['pm10 standard'],
+                    reading['pm25 standard'],
+                    reading['pm100 standard'],
+                    reading['pm10 env'],
+                    reading['pm25 env'],
+                    reading['pm100 env'],
+                    reading['particles 03um'],
+                    reading['particles 05um'],
+                    reading['particles 10um'],
+                    reading['particles 25um'],
+                    reading['particles 50um'],
+                    reading['particles 100um'],
                 ) = struct.unpack(">HHHHHHHHHHHH", self._buffer[4:28])
 
                 return AQData(reading["pm10 env"], reading["pm25 env"], reading["pm100 env"])
@@ -413,9 +422,16 @@ def main():
                            f'{type(e).__name__}: {e} | Trying again...')
             time.sleep(5)
 
+    loop_count = 0
     # Read sensor and post data to server
     while True:
         try:
+            if loop_count % 120 == 0:
+                gc.collect()
+                Logger().queue(LogType.INFO, LogCode.FREE_MEMORY_STATUS,
+                               f'Free RAM: {gc.mem_free()} bytes')
+                Logger().flush_to_server(api)
+            loop_count += 1
             flash_led_active()
             connected = connect_to_wifi(config, wlan, False)
             if connected:
@@ -426,7 +442,7 @@ def main():
                     print("No sensor data was returned")
                     continue
                 print(f'Sensor data received: {data.pm25}')
-                api.send_sensor_data_to_server(data)
+                api.send_aq(data)
 
                 Logger().flush_to_server(api)
 
@@ -437,6 +453,12 @@ def main():
                                "Initial WiFi Lost - Reconnecting")
                 api = WebAPI(config.client_key,
                              config.log_url, config.data_url)
+        except MemoryError:
+            while True:
+                led.on()
+                time.sleep(0.1)
+                led.off()
+                time.sleep(0.1)
         except Exception as e:
             Logger().queue(LogType.ERROR, LogCode.GENERAL_EXCEPTION,
                            f'{type(e)}: {e}')
