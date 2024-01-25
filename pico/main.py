@@ -49,7 +49,7 @@ class LogCode:
     DEVICE_POWER_ON = 31
     WIFI_INITIAL_LOST = 44
     GENERAL_EXCEPTION = -9
-    FREE_MEMORY_STATUS = 60
+    FREE_MEMORY_STATUS = 69
 
 
 class Log:
