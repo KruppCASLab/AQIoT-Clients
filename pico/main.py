@@ -2,6 +2,7 @@
 MicroPython Version of Pico AQ Sensor
 MicroPython defaults to main.py
 """
+from typing import NoReturn
 import json
 import struct
 import time
@@ -195,9 +196,10 @@ class Logger:
 
 # unsupported inheriting from `Enum` in micropython
 class ClientError:
-    CONFIG_WIFI = const(1)
-    CONFIG_ENDPOINT = const(2)
-    WIFI_FAILURE = const(3)
+    CONFIG_GENERIC = const(1)
+    CONFIG_WIFI = const(2)
+    CONFIG_ENDPOINT = const(3)
+    WIFI_FAILURE = const(4)
 
 
 class ClientConfig:
@@ -365,22 +367,14 @@ class Wifi:
 
 
 @micropython.native
-def flash_led_error(error_type: int):
-    n_blinks = 0
-    if error_type == ClientError.CONFIG_WIFI:
-        n_blinks = 1
-    elif error_type == ClientError.CONFIG_ENDPOINT:
-        n_blinks = 2
-    elif error_type == ClientError.WIFI_FAILURE:
-        n_blinks = 3
-
-    for _ in range(n_blinks):
+def flash_led_error(blinks: int):
+    for _ in range(blinks):
         led.on()
-        time.sleep(1)
+        time.sleep(0.5)
         led.off()
-        time.sleep(1)
-    # Circuit python has 5-second delay between errors, must not use 5 as value
-    time.sleep(3)
+        time.sleep(0.5)
+
+    time.sleep(5)
 
 
 # TODO: This seems to overlap with error blinking
@@ -397,12 +391,12 @@ def flash_led_active():
 def halt_client_error(client_error: int, label: str):
     print(f'[Client] Error type: {client_error}: {label}')
     while True:
-        for _ in range(5):
-            flash_led_error(client_error)
+        flash_led_error(client_error)
+            
 
 
 @micropython.native
-def load_client_config() -> ClientConfig | None:
+def load_client_config() -> ClientConfig: # type: ignore (Returns or halts)
     try:
         with open("config.json") as fd:
             config_data = json.load(fd)
@@ -413,16 +407,13 @@ def load_client_config() -> ClientConfig | None:
                                   config_data["client_key"])
             if config.wifi_ssid is None or config.wifi_pass is None:
                 halt_client_error(ClientError.CONFIG_WIFI,
-                                  "WiFi config missing from toml configuration.")
-                return None
+                                  "Wifi config missing from toml configuration.")
             elif config.data_url is None or config.log_url is None or config.client_key is None:
                 halt_client_error(ClientError.CONFIG_ENDPOINT,
                                   "Endpoint config missing from toml configuration.")
-                return None
-
             return config
     except:
-        return None
+        halt_client_error(ClientError.CONFIG_GENERIC, "Error with config")
 
 
 @micropython.native
@@ -434,11 +425,9 @@ def main():
     Logger().queue(LogType.INFO, LogCode.DEVICE_POWER_ON,
                    "[Main] Pico Powered On")
     config = load_client_config()
-    if config is None:
-        halt_client_error(ClientError.CONFIG_WIFI, "Config is None")
 
-    if not Wifi().connect(config.wifi_ssid, config.wifi_pass):
-        halt_client_error(ClientError.CONFIG_WIFI, "Cannot to wifi")
+    while not Wifi().connect(config.wifi_ssid, config.wifi_pass):
+        Logger().flush_to_server()
 
     api = WebApi(config.client_key, config.log_url, config.data_url)
     Logger().flush_to_server(api)
