@@ -426,6 +426,7 @@ def main():
     config = load_client_config()
 
     while not Wifi().connect(config.wifi_ssid, config.wifi_pass):
+        Logger().queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED, "[Main] Unable to establish initial connection, retrying...")
         Logger().flush_to_server()
 
     api = WebApi(config.client_key, config.log_url, config.data_url)
