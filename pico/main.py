@@ -10,71 +10,86 @@ import ubinascii
 import urequests
 import gc
 from machine import Pin, UART
+from micropython import const
+import micropython
 
 
-READINGS_DELAY_SECS = 60
-SENSOR_READ_MAX_ATTEMPTS = 50
-WEB_API_REQUESTS_DELAY_SECS = 1
-WEB_API_MAX_ATTEMPTS = 5
-WIFI_CONNECT_MAX_ATTEMPTS = 25
+READINGS_DELAY_SECS = const(60)
+SENSOR_READ_MAX_ATTEMPTS = const(50)
+SENSOR_READ_ATTEMPT_DELAY = const(2)
+WEB_API_REQUESTS_DELAY_SECS = const(1)
+WEB_API_MAX_ATTEMPTS = const(5)
+WIFI_CONNECT_MAX_ATTEMPTS = const(10)
+WIFI_CONNECT_ATTEMPT_DELAY = const(5)
+WIFI_CONNECT_CHECK_DELAY = const(5)
+LOG_QUEUE_MAX_SIZE = const(20)
+# every MEM_REPORTING_FREQ readings, it will report memory status
+MEM_REPORTING_FREQ = const(120)
+WATCHDOG_TIMEOUT_MSEC = const(1000)
 
-led = Pin("LED", Pin.OUT)  # TODO: string for pin id?
+led = Pin("LED", Pin.OUT)
 
 
 # Corresponds to server log types
 # unsupported inheriting from `Enum` in micropython
 class LogType:
-    INFO = "INFO"
-    WARNING = "WARNING"
-    ERROR = "ERROR"
+    INFO = const("INFO")
+    WARNING = const("WARNING")
+    ERROR = const("ERROR")
 
 
 # Corresponds to server log codes
 # unsupported inheriting from `Enum` in micropython
 class LogCode:
-    WIFI_CONNECT_SUCCESS = 30
-    WIFI_CONNECT_FAILED = 4
-    WIFI_SOCKET_POOL_HUMAN_ERROR = 5
-    WIFI_SOCKET_POOL_CREATION_ERROR = 6
-    WIFI_REQUESTS_POTENTIAL_HUMAN_ERROR = 7
-    WIFI_REQUESTS_CREATION_ERROR_UNDEFINED_POOL = 8
-    WIFI_REQUESTS_CREATION_ERROR = 9
-    SENSOR_UART_FAIL = 10
-    SENSOR_PM25_CREATE_FAIL_NO_UART = 11
-    SENSOR_PM25_CREATE_FAIL = 12
-    SENSOR_PM25_UNDEFINED = 13
-    SENSOR_PM25_READ_FAIL = 14
-    DATA_POST_FAILED = 16
-    DATA_POST_FAILED_MAX_RETRY = 18
-    DEVICE_POWER_ON = 31
-    WIFI_INITIAL_LOST = 44
-    GENERAL_EXCEPTION = -9
-    FREE_MEMORY_STATUS = 69
+    WIFI_CONNECT_SUCCESS = const(30)
+    WIFI_CONNECT_FAILED = const(4)
+    WIFI_SOCKET_POOL_HUMAN_ERROR = const(5)
+    WIFI_SOCKET_POOL_CREATION_ERROR = const(6)
+    WIFI_REQUESTS_POTENTIAL_HUMAN_ERROR = const(7)
+    WIFI_REQUESTS_CREATION_ERROR_UNDEFINED_POOL = const(8)
+    WIFI_REQUESTS_CREATION_ERROR = const(9)
+    SENSOR_UART_FAIL = const(10)
+    SENSOR_PM25_CREATE_FAIL_NO_UART = const(11)
+    SENSOR_PM25_CREATE_FAIL = const(12)
+    SENSOR_PM25_UNDEFINED = const(13)
+    SENSOR_PM25_READ_FAIL = const(14)
+    DATA_POST_FAILED = const(16)
+    DATA_POST_FAILED_MAX_RETRY = const(18)
+    DEVICE_POWER_ON = const(31)
+    WIFI_INITIAL_LOST = const(44)
+    GENERAL_EXCEPTION = const(-9)
+    MEMORY_STATUS = const(69)
+    LOG_QUEUE_STATUS = const(32)
 
 
 class Log:
+    @micropython.native
     def __init__(self, type: str, code: int, message: str):
         self.type = type
         self.code = code
         self.message = message
 
+    @micropython.native
     def __str__(self) -> str:
         return f'{self.type} ({self.code}): {self.message}'
 
 
 class AQData:
+    @micropython.native
     def __init__(self, pm10: str, pm25: str, pm100: str):
         self.pm10 = pm10
         self.pm25 = pm25
         self.pm100 = pm100
 
 
-class WebAPI:
+class WebApi:
+    @micropython.native
     def __init__(self, client_key: str, log_url: str, data_url: str):
         self._client_key = client_key
         self._log_url = log_url
         self._data_url = data_url
 
+    @micropython.native
     def send_log(self, log: Log) -> bool:
         return self._send_data(self._log_url, {
             'type': log.type,
@@ -82,6 +97,7 @@ class WebAPI:
             'message': log.message
         })
 
+    @micropython.native
     def send_aq(self, sensor_data: AQData) -> bool:
         json_data = {
             'pm25': sensor_data.pm25,
@@ -90,94 +106,102 @@ class WebAPI:
         }
         return self._send_data(self._data_url, json_data)
 
+    @micropython.native
     def _send_data(self, url: str, data: object):
         attempts = 1
+        response = None  # intentional to cleanup if exception is thrown
         while attempts <= WEB_API_MAX_ATTEMPTS:
             try:
+                gc.collect()  # server response might be large
+                response = None
                 response = urequests.post(url,
                                           headers={
                                               'Content-Type': 'application/json',
                                               'x-api-key': self._client_key
                                           },
                                           data=json.dumps(data))
-                if int(response.status_code) != 200:
-                    # TODO: Blink failure
+                if response.status_code != 200:
                     Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                                   f'Error: Received unexpected response from server: {response.status_code}: {response.text}')
+                                   f'[WebApi] Received unexpected response from server: {response.status_code}: {response.text}')
                     response.close()
+                    attempts += 1
                 else:
-                    # TODO: Blink success
                     print(
-                        f'Success: Data sent to server: {response.status_code}')
+                        f'[WebApi] Data sent to server, status code: {response.status_code}')
                     response.close()
                     return True
-            except RuntimeError as re:
-                Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                               f'Error: Timeout in sending data to server. Exception: {re}')
-                attempts += 1
             except Exception as e:
+                if response is not None:
+                    response.close()
                 Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED,
-                               f'Error: Exception in sending data to server. Exception: {e}')
+                               f'[WebApi] Exception in sending data to server. Exception: {e}')
                 print(
-                    f'Exception occurred in sending data to server: {type(e)}: {e}')
+                    f'[WebApi] Exception occurred in sending data to server: {type(e)}: {e}')
                 attempts += 1
 
-            attempts += 1
             time.sleep(WEB_API_REQUESTS_DELAY_SECS)
 
-        print('Max retry of sending reached')
+        print('[WebApi] Max retry of sending reached')
         Logger().queue(LogType.ERROR, LogCode.DATA_POST_FAILED_MAX_RETRY,
-                       'Error: Max Retry Reached in Sending Data')
+                       '[WebApi] Max Retry Reached in Sending Data')
         return False
-
-    def is_connected(self, wlan: network.WLAN):
-        return wlan.status() == network.STAT_GOT_IP
 
 
 class Logger:
     # Logger | None (unsupported `from __future__ import annotations` in micropython)
     _instance = None
 
+    @micropython.native
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(Logger, cls).__new__(cls)
             cls._instance._init()
         return cls._instance
 
+    @micropython.native
     def _init(self):
         self._log_queue: list[Log] = []
 
+    @micropython.native
     def queue(self, type: str, code: int, message: str):
-        log = Log(type, code, message)
-        print(f'Queued log: {log}')
-        self._log_queue.append(log)
+        if len(self._log_queue) >= LOG_QUEUE_MAX_SIZE:
+            print(f'[Logger] Unable to queue log. Queue full')
+            self._log_queue[len(self._log_queue) - 1] = \
+                Log(LogType.WARNING, LogCode.LOG_QUEUE_STATUS,
+                    "Log Queue Full. Truncating new logs")
+        else:
+            log = Log(type, code, message)
+            self._log_queue.append(log)
+            print(f'[Logger] Queued log type: {type}, code: {code}')
 
-    def flush_to_server(self, api: WebAPI):
-        print("Flushing logs to server...")
+    @micropython.native
+    def flush_to_server(self, api: WebApi):
+        print(f'[Logger] Flushing {len(self._log_queue)} logs to server...')
         sent = []
         for log in self._log_queue:
-            print("\tSending:", log)
             result = api.send_log(log)
             if result == False:
-                print(f'\tFailed to send: {log}')
+                print(
+                    f'[Logger] Failed to send log type: {log.type}, code: {log.code}')
             else:
-                print(f'\tSent: {log}')
+                print(f'[Logger] Sent log type: {log.type}, code: {log.code}')
                 sent.append(log)
 
-        # Remove the entries that were successful
         for log in sent:
             self._log_queue.remove(log)
 
+        gc.collect()  # removing logs frees up memory
+
+
 # unsupported inheriting from `Enum` in micropython
-
-
 class ClientError:
-    CONFIG_WIFI = 1
-    CONFIG_ENDPOINT = 2
-    WIFI_FAILURE = 3
+    CONFIG_WIFI = const(1)
+    CONFIG_ENDPOINT = const(2)
+    WIFI_FAILURE = const(3)
 
 
 class ClientConfig:
+    @micropython.native
     def __init__(self, wifi_ssid: str, wifi_pass: str, data_url: str, log_url: str, client_key: str):
         self.wifi_ssid = wifi_ssid
         self.wifi_pass = wifi_pass
@@ -186,6 +210,7 @@ class ClientConfig:
         self.client_key = client_key
 
 
+@micropython.native
 def network_status_str(value: int) -> str:
     # unsupported `match` in micropython
     if value == network.STAT_IDLE:
@@ -203,14 +228,15 @@ def network_status_str(value: int) -> str:
 
 
 class Sensor:
+    @micropython.native
     def __init__(self):
         self._buffer = bytearray(32)
         self._uart = UART(0)
-        self._delay_between_attempts = 1
 
         self._uart.init(baudrate=9600, bits=8, parity=None,
                         stop=1, tx=Pin(0), rx=Pin(1))
 
+    @micropython.native
     def read(self):
         # Use a dictionary to hold our data
         reading = {
@@ -228,8 +254,10 @@ class Sensor:
             "particles 100um": None,
         }
 
-        for _ in range(0, SENSOR_READ_MAX_ATTEMPTS):
-            time.sleep(self._delay_between_attempts)
+        for attempt in range(1, SENSOR_READ_MAX_ATTEMPTS):
+            print(
+                f'[Sensor] Attempt {attempt}/{SENSOR_READ_MAX_ATTEMPTS} to read from sensor...')
+            time.sleep(SENSOR_READ_ATTEMPT_DELAY)
             try:
                 byte = self._uart.read(1)
                 # If we did not get a byte or it doesn't match the header, continue to read
@@ -284,57 +312,59 @@ class Sensor:
                 return AQData(reading["pm10 env"], reading["pm25 env"], reading["pm100 env"])
 
             except Exception as e:
-                print(f'Exception reading sensor: {e}: retrying...')
-                time.sleep(self._delay_between_attempts)
+                print(f'[Sensor] Exception reading sensor: {e}: retrying...')
 
         Logger().queue(LogType.ERROR, LogCode.SENSOR_PM25_READ_FAIL,
-                       f'PM25 Read Failure: Reached Max Retry Count: {SENSOR_READ_MAX_ATTEMPTS}')
+                       f'[Sensor] PM25 Read Failure: Reached Max Retry Count: {SENSOR_READ_MAX_ATTEMPTS}')
 
 
-def connect_to_wifi(config: ClientConfig, wlan: network.WLAN, is_initial=True):
-    attempts = 1
-    delay = 1
+class Wifi:
+    # Wifi | None (unsupported `from __future__ import annotations` in micropython)
+    _instance = None
 
-    if config == None:
-        client_error(ClientError.CONFIG_WIFI, "Config is None")
-        return
+    @micropython.native
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(Wifi, cls).__new__(cls)
+            cls._instance._init()
+        return cls._instance
 
-    print(f'Attempting to Connect to SSID: {config.wifi_ssid}')
+    @micropython.native
+    def _init(self):
+        self._wlan = network.WLAN(network.STA_IF)
+        self._wlan.active(True)
 
-    mac_address = ubinascii.hexlify(network.WLAN(
-        network.STA_IF).config('mac'), ':').decode()
-    wlan.disconnect()
-    wlan.connect(config.wifi_ssid, config.wifi_pass)
+    @micropython.native
+    def connect(self, ssid: str, password: str) -> bool:
+        print(f'[Wifi] Attempting to Connect to SSID: {ssid}')
 
-    while attempts <= WIFI_CONNECT_MAX_ATTEMPTS:
-        if wlan.status() == network.STAT_GOT_IP:
-            break
-        # TODO: check if this prints right
-        print(
-            f'\tRetrying connection, Attempt: {attempts} WLAN Status: {network_status_str(wlan.status())}')
-        attempts += 1
-        time.sleep(delay)
+        mac_address = ubinascii.hexlify(network.WLAN(
+            network.STA_IF).config('mac'), ':').decode()
+        self._wlan.disconnect()
+        self._wlan.connect(ssid, password)
 
-    if wlan.status() == network.STAT_GOT_IP:
-        ip = wlan.ifconfig()[0]
-        if is_initial:
-            Logger().queue(LogType.INFO, LogCode.WIFI_CONNECT_SUCCESS,
-                           f'Successfully Connected to the wifi. Mac: {mac_address} IP: {ip} | Attempt: {attempts}')
-        return True
-
-    else:
-        if is_initial:
-            client_error(ClientError.WIFI_FAILURE,
-                         "Unable to make initial connection to WiFi")
-        elif attempts == WIFI_CONNECT_MAX_ATTEMPTS:
-            Logger().queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
-                           f'Unable to connect to wifi after max attempts {attempts}')
-        else:
-            Logger().queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
-                           f'Unable to connect to wifi wlan_status: {wlan.status()}: {network_status_str(wlan.status())}')
+        for attempt in range(1, WIFI_CONNECT_MAX_ATTEMPTS):
+            print(
+                f'[Wifi] Attempt {attempt}/{WIFI_CONNECT_MAX_ATTEMPTS} to connect')
+            self._wlan.connect(ssid, password)
+            print(
+                f'[Wifi] Waiting {WIFI_CONNECT_CHECK_DELAY} secs to establish before checking connection status...')
+            time.sleep(WIFI_CONNECT_CHECK_DELAY)
+            if self._wlan.status() == network.STAT_GOT_IP:
+                ip = self._wlan.ifconfig()[0]
+                Logger().queue(LogType.INFO, LogCode.WIFI_CONNECT_SUCCESS,
+                               f'[Wifi] Successfully Connected to the wifi. Mac: {mac_address} IP: {ip} | Attempt: {attempt}')
+                return True
+            print("[Wifi] Connection not established, retrying...")
+            time.sleep(WIFI_CONNECT_ATTEMPT_DELAY)
         return False
 
+    @micropython.native
+    def connected(self) -> bool:
+        return self._wlan.status() == network.STAT_GOT_IP
 
+
+@micropython.native
 def flash_led_error(error_type: int):
     n_blinks = 0
     if error_type == ClientError.CONFIG_WIFI:
@@ -354,6 +384,7 @@ def flash_led_error(error_type: int):
 
 
 # TODO: This seems to overlap with error blinking
+@micropython.native
 def flash_led_active():
     for _ in range(2):
         led.on()
@@ -362,12 +393,15 @@ def flash_led_active():
         time.sleep(0.1)
 
 
-def client_error(client_error: int, label: str):
-    print(f'Error type: {client_error}: {label}')
-    for _ in range(5):
-        flash_led_error(client_error)
+@micropython.native
+def halt_client_error(client_error: int, label: str):
+    print(f'[Client] Error type: {client_error}: {label}')
+    while True:
+        for _ in range(5):
+            flash_led_error(client_error)
 
 
+@micropython.native
 def load_client_config() -> ClientConfig | None:
     try:
         with open("config.json") as fd:
@@ -378,12 +412,12 @@ def load_client_config() -> ClientConfig | None:
                                   config_data["log_url"],
                                   config_data["client_key"])
             if config.wifi_ssid is None or config.wifi_pass is None:
-                client_error(ClientError.CONFIG_WIFI,
-                             "WiFi config missing from toml configuration.")
+                halt_client_error(ClientError.CONFIG_WIFI,
+                                  "WiFi config missing from toml configuration.")
                 return None
             elif config.data_url is None or config.log_url is None or config.client_key is None:
-                client_error(ClientError.CONFIG_ENDPOINT,
-                             "Endpoint config missing from toml configuration.")
+                halt_client_error(ClientError.CONFIG_ENDPOINT,
+                                  "Endpoint config missing from toml configuration.")
                 return None
 
             return config
@@ -391,25 +425,22 @@ def load_client_config() -> ClientConfig | None:
         return None
 
 
+@micropython.native
 def main():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
+    # TODO: watchdog
 
     led.on()
 
-    Logger().queue(LogType.INFO, LogCode.DEVICE_POWER_ON, "Pico Powered On")
+    Logger().queue(LogType.INFO, LogCode.DEVICE_POWER_ON,
+                   "[Main] Pico Powered On")
     config = load_client_config()
-    while config is None:
-        client_error(ClientError.CONFIG_WIFI, "Config is None")
-        config = load_client_config()
+    if config is None:
+        halt_client_error(ClientError.CONFIG_WIFI, "Config is None")
 
-    # Initialize wifi, network, and sensor
-    while True:
-        connect_success = connect_to_wifi(config, wlan)
-        if connect_success:
-            break
+    if not Wifi().connect(config.wifi_ssid, config.wifi_pass):
+        halt_client_error(ClientError.CONFIG_WIFI, "Cannot to wifi")
 
-    api = WebAPI(config.client_key, config.log_url, config.data_url)
+    api = WebApi(config.client_key, config.log_url, config.data_url)
     Logger().flush_to_server(api)
 
     while True:
@@ -419,40 +450,44 @@ def main():
         except Exception as e:
             Logger().queue(LogType.ERROR,
                            LogCode.SENSOR_UART_FAIL,    # TODO: Not quite the right category
-                           f'{type(e).__name__}: {e} | Trying again...')
+                           f'[Main] {type(e).__name__}: {e} | Trying again...')
             time.sleep(5)
 
     loop_count = 0
     # Read sensor and post data to server
     while True:
         try:
-            if loop_count % 120 == 0:
-                gc.collect()
-                Logger().queue(LogType.INFO, LogCode.FREE_MEMORY_STATUS,
-                               f'Free RAM: {gc.mem_free()} bytes')
+            gc.collect()
+            if loop_count % MEM_REPORTING_FREQ == 0:
+                Logger().queue(LogType.INFO, LogCode.MEMORY_STATUS,
+                               f'[Main] Free RAM: {gc.mem_free()} bytes')
                 Logger().flush_to_server(api)
+
             loop_count += 1
             flash_led_active()
-            connected = connect_to_wifi(config, wlan, False)
-            if connected:
-                print(
-                    f'Network is connected: WLAN Status: {network_status_str(wlan.status())}')
+
+            connected = Wifi().connected()
+            if not connected:
+                Logger().queue(LogType.INFO, LogCode.WIFI_INITIAL_LOST,
+                               "[Main] Initial WiFi Lost - Reconnecting")
+                connected = Wifi().connect(config.wifi_ssid, config.wifi_pass)
+
+            if not connected:
+                Logger.queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
+                             "[Main] Unable to reconnect to wifi, skipping to next reading")
+            else:
                 data = sensor.read()
                 if data is None:
-                    print("No sensor data was returned")
-                    continue
-                print(f'Sensor data received: {data.pm25}')
-                api.send_aq(data)
+                    print("[Main] No sensor data was returned")
+                else:
+                    print(f'[Main] Sensor data received: {data.pm25} pm25')
+                    api.send_aq(data)
 
-                Logger().flush_to_server(api)
+            Logger().flush_to_server(api)
 
-                print(f'Attempting next reading in {READINGS_DELAY_SECS} secs')
-                time.sleep(READINGS_DELAY_SECS)
-            else:
-                Logger().queue(LogType.INFO, LogCode.WIFI_INITIAL_LOST,
-                               "Initial WiFi Lost - Reconnecting")
-                api = WebAPI(config.client_key,
-                             config.log_url, config.data_url)
+            print(
+                f'[Main] Attempting next reading in {READINGS_DELAY_SECS} secs')
+            time.sleep(READINGS_DELAY_SECS)
         except MemoryError:
             while True:
                 led.on()
@@ -461,7 +496,9 @@ def main():
                 time.sleep(0.1)
         except Exception as e:
             Logger().queue(LogType.ERROR, LogCode.GENERAL_EXCEPTION,
-                           f'{type(e)}: {e}')
+                           f'[Main] {type(e)}: {e}')
+            Logger().flush_to_server(api)
+            time.sleep(READINGS_DELAY_SECS)
 
 
 main()
