@@ -168,7 +168,7 @@ class Logger:
             print(f'[Logger] Unable to queue log. Queue full')
             self._log_queue[len(self._log_queue) - 1] = \
                 Log(LogType.WARNING, LogCode.LOG_QUEUE_STATUS,
-                    "Log Queue Full. Truncating new logs")
+                    "[Logger] Log Queue Full. Truncating new logs")
         else:
             log = Log(type, code, message)
             self._log_queue.append(log)
