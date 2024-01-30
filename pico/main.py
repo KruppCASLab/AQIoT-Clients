@@ -2,7 +2,6 @@
 MicroPython Version of Pico AQ Sensor
 MicroPython defaults to main.py
 """
-from typing import NoReturn
 import json
 import struct
 import time
