@@ -391,11 +391,10 @@ def halt_client_error(client_error: int, label: str):
     print(f'[Client] Error type: {client_error}: {label}')
     while True:
         flash_led_error(client_error)
-            
 
 
 @micropython.native
-def load_client_config() -> ClientConfig: # type: ignore (Returns or halts)
+def load_client_config() -> ClientConfig:  # type: ignore (Returns or halts)
     try:
         with open("config.json") as fd:
             config_data = json.load(fd)
@@ -426,8 +425,7 @@ def main():
     config = load_client_config()
 
     while not Wifi().connect(config.wifi_ssid, config.wifi_pass):
-        Logger().queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED, "[Main] Unable to establish initial connection, retrying...")
-        Logger().flush_to_server()
+        print("[Main] Trying to connect to wifi again...")
 
     api = WebApi(config.client_key, config.log_url, config.data_url)
     Logger().flush_to_server(api)
