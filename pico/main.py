@@ -19,7 +19,6 @@ SENSOR_READ_MAX_ATTEMPTS = const(500)
 SENSOR_READ_ATTEMPT_DELAY = const(0)
 WEB_API_REQUESTS_DELAY_SECS = const(1)
 WEB_API_MAX_ATTEMPTS = const(5)
-WIFI_CONNECT_MAX_ATTEMPTS = const(10)
 WIFI_CONNECT_ATTEMPT_DELAY = const(5)
 WIFI_CONNECT_CHECK_DELAY = const(5)
 LOG_QUEUE_MAX_SIZE = const(20)
@@ -336,7 +335,7 @@ class Wifi:
         self._wlan.active(True)
 
     @micropython.native
-    def connect(self, ssid: str, password: str) -> bool:
+    def connect(self, ssid: str, password: str) -> None:
         print(f'[Wifi] Attempting to Connect to SSID: {ssid}')
 
         mac_address = ubinascii.hexlify(network.WLAN(
@@ -344,9 +343,10 @@ class Wifi:
         self._wlan.disconnect()
         self._wlan.connect(ssid, password)
 
-        for attempt in range(1, WIFI_CONNECT_MAX_ATTEMPTS):
+        attempt_count = 1
+        while True:
             print(
-                f'[Wifi] Attempt {attempt}/{WIFI_CONNECT_MAX_ATTEMPTS} to connect')
+                f'[Wifi] Attempt {attempt_count} to connect')
             self._wlan.connect(ssid, password)
             print(
                 f'[Wifi] Waiting {WIFI_CONNECT_CHECK_DELAY} secs to establish before checking connection status...')
@@ -354,11 +354,11 @@ class Wifi:
             if self._wlan.status() == network.STAT_GOT_IP:
                 ip = self._wlan.ifconfig()[0]
                 Logger().queue(LogType.INFO, LogCode.WIFI_CONNECT_SUCCESS,
-                               f'[Wifi] Successfully Connected to the wifi. Mac: {mac_address} IP: {ip} | Attempt: {attempt}')
-                return True
+                               f'[Wifi] Successfully Connected to the wifi. Mac: {mac_address} IP: {ip} | Attempt: {attempt_count}')
+                return
             print("[Wifi] Connection not established, retrying...")
             time.sleep(WIFI_CONNECT_ATTEMPT_DELAY)
-        return False
+            attempt_count += 1
 
     @micropython.native
     def connected(self) -> bool:
@@ -424,8 +424,7 @@ def main():
                    "[Main] Pico Powered On")
     config = load_client_config()
 
-    while not Wifi().connect(config.wifi_ssid, config.wifi_pass):
-        print("[Main] Trying to connect to wifi again...")
+    Wifi().connect(config.wifi_ssid, config.wifi_pass)
 
     api = WebApi(config.client_key, config.log_url, config.data_url)
     Logger().flush_to_server(api)
@@ -457,18 +456,14 @@ def main():
             if not connected:
                 Logger().queue(LogType.INFO, LogCode.WIFI_INITIAL_LOST,
                                "[Main] Initial WiFi Lost - Reconnecting")
-                connected = Wifi().connect(config.wifi_ssid, config.wifi_pass)
+                Wifi().connect(config.wifi_ssid, config.wifi_pass)
 
-            if not connected:
-                Logger.queue(LogType.ERROR, LogCode.WIFI_CONNECT_FAILED,
-                             "[Main] Unable to reconnect to wifi, skipping to next reading")
+            data = sensor.read()
+            if data is None:
+                print("[Main] No sensor data was returned")
             else:
-                data = sensor.read()
-                if data is None:
-                    print("[Main] No sensor data was returned")
-                else:
-                    print(f'[Main] Sensor data received: {data.pm25} pm25')
-                    api.send_aq(data)
+                print(f'[Main] Sensor data received: {data.pm25} pm25')
+                api.send_aq(data)
 
             Logger().flush_to_server(api)
 
