@@ -13,7 +13,7 @@ from machine import Pin, UART, WDT
 from micropython import const
 import micropython
 
-
+SCRIPT_ID = const(3)
 READINGS_DELAY_SECS = const(60)
 SENSOR_READ_MAX_ATTEMPTS = const(500)
 SENSOR_READ_ATTEMPT_DELAY = const(0)
@@ -430,7 +430,7 @@ def main():
     led.on()
 
     Logger().queue(LogType.INFO, LogCode.DEVICE_POWER_ON,
-                   "[Main] [Script Id: 3] Pico Powered On")
+                   f'[Main] [Script Id: {SCRIPT_ID}] Pico Powered On')
     config = load_client_config()    
     wdt.feed()
 
