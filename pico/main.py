@@ -9,7 +9,7 @@ import network
 import ubinascii
 import urequests
 import gc
-from machine import Pin, UART
+from machine import Pin, UART, WDT
 from micropython import const
 import micropython
 
@@ -27,6 +27,8 @@ MEM_REPORTING_FREQ = const(120)
 WATCHDOG_TIMEOUT_MSEC = const(1000)
 
 led = Pin("LED", Pin.OUT)
+wdt = WDT(timeout=8000)
+wdt.feed()
 
 
 # Corresponds to server log types
@@ -110,6 +112,7 @@ class WebApi:
         attempts = 1
         response = None  # intentional to cleanup if exception is thrown
         while attempts <= WEB_API_MAX_ATTEMPTS:
+            wdt.feed()
             try:
                 gc.collect()  # server response might be large
                 response = None
@@ -178,6 +181,7 @@ class Logger:
         print(f'[Logger] Flushing {len(self._log_queue)} logs to server...')
         sent = []
         for log in self._log_queue:
+            wdt.feed()
             result = api.send_log(log)
             if result == False:
                 print(
@@ -255,9 +259,11 @@ class Sensor:
         }
 
         for attempt in range(1, SENSOR_READ_MAX_ATTEMPTS):
+            wdt.feed()
             print(
                 f'[Sensor] Attempt {attempt}/{SENSOR_READ_MAX_ATTEMPTS} to read from sensor...')
             time.sleep(SENSOR_READ_ATTEMPT_DELAY)
+            wdt.feed()
             try:
                 byte = self._uart.read(1)
                 # If we did not get a byte or it doesn't match the header, continue to read
@@ -337,11 +343,13 @@ class Wifi:
     @micropython.native
     def connect(self, ssid: str, password: str) -> None:
         print(f'[Wifi] Attempting to Connect to SSID: {ssid}')
-
+        wdt.feed()
         mac_address = ubinascii.hexlify(network.WLAN(
             network.STA_IF).config('mac'), ':').decode()
         self._wlan.disconnect()
+        wdt.feed()
         self._wlan.connect(ssid, password)
+        wdt.feed()
 
         attempt_count = 1
         while True:
@@ -351,6 +359,7 @@ class Wifi:
             print(
                 f'[Wifi] Waiting {WIFI_CONNECT_CHECK_DELAY} secs to establish before checking connection status...')
             time.sleep(WIFI_CONNECT_CHECK_DELAY)
+            wdt.feed()
             if self._wlan.status() == network.STAT_GOT_IP:
                 ip = self._wlan.ifconfig()[0]
                 Logger().queue(LogType.INFO, LogCode.WIFI_CONNECT_SUCCESS,
@@ -358,6 +367,7 @@ class Wifi:
                 return
             print("[Wifi] Connection not established, retrying...")
             time.sleep(WIFI_CONNECT_ATTEMPT_DELAY)
+            wdt.feed()
             attempt_count += 1
 
     @micropython.native
@@ -372,8 +382,9 @@ def flash_led_error(blinks: int):
         time.sleep(0.5)
         led.off()
         time.sleep(0.5)
-
+        wdt.feed()
     time.sleep(5)
+    wdt.feed()
 
 
 # TODO: This seems to overlap with error blinking
@@ -416,13 +427,12 @@ def load_client_config() -> ClientConfig:  # type: ignore (Returns or halts)
 
 @micropython.native
 def main():
-    # TODO: watchdog
-
     led.on()
 
     Logger().queue(LogType.INFO, LogCode.DEVICE_POWER_ON,
-                   "[Main] Pico Powered On")
-    config = load_client_config()
+                   "[Main] [Script Id: 3] Pico Powered On")
+    config = load_client_config()    
+    wdt.feed()
 
     Wifi().connect(config.wifi_ssid, config.wifi_pass)
 
@@ -432,44 +442,50 @@ def main():
     while True:
         try:
             sensor = Sensor()
+            wdt.feed()
             break
         except Exception as e:
             Logger().queue(LogType.ERROR,
                            LogCode.SENSOR_UART_FAIL,    # TODO: Not quite the right category
                            f'[Main] {type(e).__name__}: {e} | Trying again...')
             time.sleep(5)
+            wdt.feed()
 
-    loop_count = 0
+    loop_count = -1
     # Read sensor and post data to server
     while True:
         try:
+            loop_count += 1
             gc.collect()
-            if loop_count % MEM_REPORTING_FREQ == 0:
+            wdt.feed()
+            if loop_count % (MEM_REPORTING_FREQ * 12) == 0:
                 Logger().queue(LogType.INFO, LogCode.MEMORY_STATUS,
                                f'[Main] Free RAM: {gc.mem_free()} bytes')
                 Logger().flush_to_server(api)
+                wdt.feed()
 
-            loop_count += 1
             flash_led_active()
 
-            connected = Wifi().connected()
-            if not connected:
-                Logger().queue(LogType.INFO, LogCode.WIFI_INITIAL_LOST,
-                               "[Main] Initial WiFi Lost - Reconnecting")
-                Wifi().connect(config.wifi_ssid, config.wifi_pass)
-
-            data = sensor.read()
-            if data is None:
-                print("[Main] No sensor data was returned")
-            else:
-                print(f'[Main] Sensor data received: {data.pm25} pm25')
-                api.send_aq(data)
-
-            Logger().flush_to_server(api)
-
-            print(
-                f'[Main] Attempting next reading in {READINGS_DELAY_SECS} secs')
-            time.sleep(READINGS_DELAY_SECS)
+            if loop_count % 12 == 0:
+                connected = Wifi().connected()
+                if not connected:
+                    Logger().queue(LogType.INFO, LogCode.WIFI_INITIAL_LOST,
+                                   "[Main] Initial WiFi Lost - Reconnecting")
+                    Wifi().connect(config.wifi_ssid, config.wifi_pass)
+    
+                data = sensor.read()
+                if data is None:
+                    print("[Main] No sensor data was returned")
+                else:
+                    print(f'[Main] Sensor data received: {data.pm25} pm25')
+                    api.send_aq(data)
+    
+                Logger().flush_to_server(api)
+    
+                print(
+                    f'[Main] Attempting next reading in {READINGS_DELAY_SECS} secs')
+            time.sleep(READINGS_DELAY_SECS // 12)
+            wdt.feed()
         except MemoryError:
             while True:
                 led.on()
@@ -481,6 +497,7 @@ def main():
                            f'[Main] {type(e)}: {e}')
             Logger().flush_to_server(api)
             time.sleep(READINGS_DELAY_SECS)
+            wdt.feed()
 
 
 main()
