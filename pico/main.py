@@ -14,7 +14,7 @@ from micropython import const
 import micropython
 
 # Change the SCRIPT_ID whenever you deploy a new script
-SCRIPT_ID = const(3)
+SCRIPT_ID = const(4)
 READINGS_DELAY_SECS = const(60)
 SENSOR_READ_MAX_ATTEMPTS = const(500)
 SENSOR_READ_ATTEMPT_DELAY = const(0)
@@ -24,7 +24,7 @@ WIFI_CONNECT_ATTEMPT_DELAY = const(5)
 WIFI_CONNECT_CHECK_DELAY = const(5)
 LOG_QUEUE_MAX_SIZE = const(20)
 # every MEM_REPORTING_FREQ readings, it will report memory status
-MEM_REPORTING_FREQ = const(120)
+MEM_REPORTING_FREQ = const(60 * 24) # every 24 hours
 WATCHDOG_TIMEOUT_MSEC = const(1000)
 
 led = Pin("LED", Pin.OUT)
