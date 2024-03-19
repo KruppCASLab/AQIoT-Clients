@@ -7,6 +7,19 @@ import requests
 import datetime
 import sys
 from adafruit_pm25.uart import PM25_UART
+from enum import Enum
+
+class LogType(str, Enum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+
+
+class LogCode(int, Enum):
+    WIFI_CONNECT_SUCCESS = 30
+    WIFI_CONNECT_FAILED = 4
+    SENSOR_PM25_READ_FAIL = 14
+    DEVICE_POWER_ON = 31
 
 
 class Config:
@@ -16,25 +29,6 @@ class Config:
         self.data_url = data_url
         self.log_url = log_url
         self.client_key = client_key
-
-
-with open("config.json") as fd:
-    config_data = json.load(fd)
-    config = Config(config_data["wifi_ssid"],
-                    config_data["wifi_pass"],
-                    config_data["data_url"],
-                    config_data["log_url"],
-                    config_data["client_key"])
-
-if config is None:
-    print("Unable to load config")
-    sys.exit(1)
-
-print(config.__dict__)
-
-config_interval = 60
-
-print("Starting AQIoT Service")
 
 
 def get_pm_data():
@@ -53,7 +47,10 @@ def get_pm_data():
         try:
             aqdata = pm25.read()
         except RuntimeError:
+            reading_count += 1
             print("Unable to read from PM sensor, retrying...")
+            if reading_count > 100:
+                post_log(LogType.WARNING, LogCode.SENSOR_PM25_READ_FAIL, "Excessive PM read failure, > 100")
             continue
         return aqdata
 
@@ -64,33 +61,62 @@ def dump_sensor_data(aqdata):
     now.strftime('%Y-%m-%d %H:%M:%S'), aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"]))
 
 
-def post_data(aqdata):
-    print("Sending Data")
-    try:
-        json_data = {
-            "pm25": aqdata["pm25 env"],
-            "pm10": aqdata["pm10 env"],
-            "pm100": aqdata["pm100 env"]
-        }
+def post_log(log_type: LogType, code: LogCode, message: str):
+    json_data = {
+        "type": log_type,
+        "code": code,
+        "message": message
+    }
+    send_request(json_data, config.log_url)
 
+
+def post_data(aqdata):
+    json_data = {
+        "pm25": aqdata["pm25 env"],
+        "pm10": aqdata["pm10 env"],
+        "pm100": aqdata["pm100 env"]
+    }
+    send_request(json_data, config.data_url)
+
+
+def send_request(json_data, url):
+    try:
         headers = {
             "Content-Type": "application/json",
             "x-api-key": config.client_key
         }
 
-        r = requests.post(config.data_url, json=json_data, headers=headers)
+        r = requests.post(url, json=json_data, headers=headers)
         if int(r.status_code) != 200:
             print("Response from server: ", r.status_code, r.text)
         else:
             print("Response from server: ", r.status_code, r.text)
     except Exception as e:
-        print("Unable to send data to server, will attempt on next reading")
+        print("Unable to send data to server")
         print(e)
-    print("Done Sending Data")
+
+
+with open("config.json") as fd:
+    config_data = json.load(fd)
+    config = Config(config_data["wifi_ssid"],
+                    config_data["wifi_pass"],
+                    config_data["data_url"],
+                    config_data["log_url"],
+                    config_data["client_key"])
+
+if config is None:
+    print("Unable to load config")
+    sys.exit(1)
+
+print(config.__dict__)
+
+config_interval = 60
 
 
 # Normal Operation
+print("Starting AQIoT Service")
 elapsed_sec = 0
+post_log(LogType.INFO, LogCode.DEVICE_POWER_ON, "Starting Up")
 while True:
     aqdata = get_pm_data()
     dump_sensor_data(aqdata)
