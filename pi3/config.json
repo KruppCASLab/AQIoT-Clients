@@ -1,7 +1,8 @@
 {
-    "wifi_ssid" : "",
-    "wifi_pass" : "",
-    "data_url" : "",
-    "log_url" : "",
-    "client_key" : ""
+    "wifi_ssid": "",
+    "wifi_pass": "",
+    "base_url": "https://mopsdev.bw.edu/aqiot/api/sensor/",
+    "client_id": 3,
+    "client_key": "",
+    "interval": 60
 }

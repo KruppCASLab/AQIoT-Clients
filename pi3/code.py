@@ -23,12 +23,13 @@ class LogCode(int, Enum):
 
 
 class Config:
-    def __init__(self, wifi_ssid, wifi_pass, data_url, log_url, client_key):
+    def __init__(self, wifi_ssid, wifi_pass, base_url, client_id, client_key, interval):
         self.wifi_ssid = wifi_ssid
         self.wifi_pass = wifi_pass
-        self.data_url = data_url
-        self.log_url = log_url
+        self.base_url = base_url
+        self.client_id = client_id
         self.client_key = client_key
+        self.interval = interval
 
 
 def get_pm_data():
@@ -61,22 +62,28 @@ def dump_sensor_data(aqdata):
     now.strftime('%Y-%m-%d %H:%M:%S'), aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"]))
 
 
+def build_url():
+    return config.base_url + str(config.client_id) + "/"
+
+
 def post_log(log_type: LogType, code: LogCode, message: str):
+    url = build_url() + "log"
     json_data = {
         "type": log_type,
         "code": code,
         "message": message
     }
-    send_request(json_data, config.log_url)
+    send_request(json_data, url)
 
 
 def post_data(aqdata):
+    url = build_url() + "data"
     json_data = {
         "pm25": aqdata["pm25 env"],
         "pm10": aqdata["pm10 env"],
         "pm100": aqdata["pm100 env"]
     }
-    send_request(json_data, config.data_url)
+    send_request(json_data, url)
 
 
 def send_request(json_data, url):
@@ -96,13 +103,31 @@ def send_request(json_data, url):
         print(e)
 
 
+def update_config():
+    # Check for new config
+    response = requests.get("https://krupp.dev/aqiot/config.json")
+    source_config = response.json()
+    source_base_url = source_config["base_url"]
+    source_interval = source_config["interval"]
+
+    # Update config parameters and write new config
+    if source_base_url != config.base_url or source_interval != config.interval:
+        print("Updating Config")
+        config.base_url = source_base_url
+        config.interval = source_interval
+        with open("config.json", "w") as fd:
+            json.dump(vars(config), fd, indent=4)
+
+
+# Main Operation
 with open("config.json") as fd:
     config_data = json.load(fd)
     config = Config(config_data["wifi_ssid"],
                     config_data["wifi_pass"],
-                    config_data["data_url"],
-                    config_data["log_url"],
-                    config_data["client_key"])
+                    config_data["base_url"],
+                    config_data["client_id"],
+                    config_data["client_key"],
+                    config_data["interval"])
 
 if config is None:
     print("Unable to load config")
@@ -110,15 +135,13 @@ if config is None:
 
 print(config.__dict__)
 
-config_interval = 60
-
-
 # Normal Operation
 print("Starting AQIoT Service")
 elapsed_sec = 0
 post_log(LogType.INFO, LogCode.DEVICE_POWER_ON, "Starting Up")
 while True:
+    update_config()
     aqdata = get_pm_data()
     dump_sensor_data(aqdata)
     post_data(aqdata)
-    time.sleep(config_interval)
+    time.sleep(int(config.interval))
