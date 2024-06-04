@@ -1,0 +1,17 @@
+[Unit]
+Description=AQIoT Service
+After=network.target
+StartLimitBurst=5
+StartLimitInterval=30
+FailureAction=reboot
+
+[Service]
+ExecStart=/usr/bin/python3 /home/aqiot/code.py
+WorkingDirectory=/home/aqiot
+StandardOutput=inherit
+StandardError=inherit
+Restart=on-failure
+User=aqiot
+
+[Install]
+WantedBy=multi-user.target
