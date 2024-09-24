@@ -14,3 +14,25 @@
 5. Click `WRITE` and wait for the process to complete. This will flash the OS onto the SD card.
 6. Safely eject the SD card from your computer.
 
+## 3. Set Up Your Raspberry Pi
+1. Insert the SD card into the Raspberry Pi 3 B+.
+2. Connect the following to your Raspberry Pi:
+   - HDMI cable to your monitor.
+   - USB keyboard and mouse.
+3. Connect any other external hardware (Pico Sensor)
+4. Plug in micro-USB power supply to power up Raspberry Pi
+   - choose your country, language, and time zone.
+   - set up a new password for the "pi" user.
+   - connect to a WIFI network if ethernet port not enabled.
+   - update the software
+  
+## 4. Set up Python and Write Code 
+
+### Python is preinstalled 
+- Open terminal and verify Python installation with `python3 --version`
+- first type nano hello.py
+- write a print statement `print("Hello, Raspberry Pi!")`
+- save the file and run in terminal `python3 hello_world.py`
+- Additionally, you can write in thonny IDE and run and save your code there as well.
+
+## 5 Enable SSH Access
