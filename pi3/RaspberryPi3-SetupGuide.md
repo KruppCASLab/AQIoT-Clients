@@ -36,3 +36,6 @@
 - Additionally, you can write in thonny IDE and run and save your code there as well.
 
 ## 5 Enable SSH Access
+
+
+## Set up client code for PM25 sensor
