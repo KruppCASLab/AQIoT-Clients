@@ -39,3 +39,37 @@
 
 
 ## 6. Set up client code for PM25 sensor
+- https://learn.adafruit.com/pm25-air-quality-sensor/python-and-circuitpython
+
+- Follow the Tutorial from this Link and make sure you use `raspi-config` to enable serial communication which is listed in interfaces. reboot the pi after so it can be enabled.
+
+- enable virtual environment to manage packages and install packages for UART import 
+
+```
+mkdir project-name && cd project-name
+python3 -m venv .venv
+source .venv/bin/activate
+pip3 install pyserial adafruit-circuitpython-pm25
+```
+
+ - Use the UART code for raspi3 and leave out IC2 
+
+```
+import time
+import board
+import busio
+
+reset_pin = None
+import serial
+uart = serial.Serial("/dev/ttyUSB0", baudrate=9600, timeout=0.25)
+
+#Connect to a PM2.5 sensor over UART
+from adafruit_pm25.uart import PM25_UART
+pm25 = PM25_UART(uart, reset_pin)
+```
+
+- Then after using this code and configuring the raspi serial settings, the python should be able to find the sensor.
+- Use the code from print statement of "found PM25 sensor" and use the code inside the while loop as well.
+- If successful you get some readings from the sensor detecting the air quality.
+- If not then check again if you followed the steps and if not it could be an issue with the sensor hardware not being configured correct and notify admins.
+
