@@ -11,8 +11,11 @@
   - `Raspberry Pi OS (32-bit)` for general use.
   - `Raspberry Pi OS (64-bit)` if you need 64-bit support.
 4. Click `CHOOSE STORAGE` and select your SD card.
-5. Click `WRITE` and wait for the process to complete. This will flash the OS onto the SD card.
-6. Safely eject the SD card from your computer.
+5. During the **OS Customisation** step, navigate to the `Services` tab.
+6. Tick the checkbox to `Enable SSH`.
+7. Select `password authentication` to log in using the same username and password you use while physically using your Raspberry Pi. Select `Allow public-key authentication only` to [configure an SSH key](https://www.raspberrypi.com/documentation/computers/remote-access.html#configure-ssh-without-a-password) for passwordless login.
+8. Click `WRITE` and wait for the process to complete. This will flash the OS onto the SD card.
+9. Safely eject the SD card from your computer.
 
 ## 3. Set Up Your Raspberry Pi
 1. Insert the SD card into the Raspberry Pi 3 B+.
@@ -25,7 +28,7 @@
    - set up a new password for the "pi" user.
    - connect to a WIFI network if ethernet port not enabled.
    - update the software
-  
+
 ## 4. Set up Python and Write Code 
 
 ### Python is preinstalled 
@@ -35,7 +38,53 @@
 - save the file and run in terminal `python3 hello_world.py`
 - Additionally, you can write in thonny IDE and run and save your code there as well.
 
-## 5. Enable SSH Access
+## 5. Connect to an SSH server
+
+### Terminal
+
+Open a terminal window on your computer and enter the following command, replacing the `<ip address>` placeholder with the [IP address of the Raspberry Pi you’re trying to connect to](https://www.raspberrypi.com/documentation/computers/remote-access.html#ip-address) and `<username>` with your username:
+
+```bash
+$ ssh <username>@<ip address>
+# default
+$ ssh <username>@raspberrypi.local
+```
+
+When the connection works, you will see a security warning. Type `yes` to continue. You will only see this warning the first time you connect.
+
+Enter your account password when prompted.
+
+You should now see the Raspberry Pi command prompt:
+
+```bash
+<username>@<hostname> ~ $
+# default
+<username>@raspberrypi ~ $
+```
+
+You are now connected to the Raspberry Pi remotely, and can execute commands.
+
+> If you receive a `connection timed out` error, you may have entered the wrong IP address for the Raspberry Pi. Go to your router settings(Usually it's [http://192.168.1.1](http://192.168.1.1), but differs with different routers) and find the IP address of your Raspberry Pi.
+
+### Windows SSH Softwares
+
+> Softwares like PuTTY, Xshell, MobaXTerm is commonly used for SSH connection and X11 forwarding.
+
+#### MobaXTerm
+
+1. Click `Session` tab and navigate to `SSH` tab to create a SSH session.
+2. Enter the hostname/IP address of your Raspberry Pi and your username.
+   <img src="https://raw.githubusercontent.com/Aphcity/aphcity-assets/master/20240930/105214.5fe0e8.png" style="width: 800px;" />
+3. Click `OK` and connect to the SSH terminal by entering your password.
+   <img src="https://raw.githubusercontent.com/Aphcity/aphcity-assets/master/20240930/105534.929d48.png" style="width: 800px;" />
+4. Click `Yes` to save password for future logging in.
+   <img src="https://raw.githubusercontent.com/Aphcity/aphcity-assets/master/20240930/110021.b302bd.png" />
+5. All set, your SSH terminal should be like
+   <img src="C:\Users\chalk\AppData\Roaming\Typora\typora-user-images\image-20240930110132089.png" alt="image-20240930110132089" />
+
+> You can activate X11 Forward by using commands like `geany &` that supports X11 forwarding.
+>
+> <img src="https://raw.githubusercontent.com/Aphcity/aphcity-assets/master/20240930/110430.6d5299.png" />
 
 
 ## 6. Set up client code for PM25 sensor
