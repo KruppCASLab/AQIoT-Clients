@@ -9,8 +9,8 @@ Please follow the steps below to set up the script and service file.</br></br>
 ## 1. Get path to send_ip.sh file
 Get the path to the `send_ip.sh` file. You can leave it in this pi3/utils directory of the repo or move it somewhere else.
 
-## 2. Move send-ip.service file
-Move `send-ip.service` to the `/etc/systemd/system/` directory.
+## 2. Set up send-ip.service file
+Move `send-ip.txt` to the `/etc/systemd/system/` directory AND CHANGE IT TO `send-ip.service`
 
 ## 3. Fill in send-ip.service file with your information
 Replace the comments with the correct information for your pi's configuration. Remember to include a label argument!
