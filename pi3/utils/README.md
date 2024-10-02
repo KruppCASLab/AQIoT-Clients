@@ -21,7 +21,7 @@ After you have finished the previous steps and saved your changes, run `sudo sys
 ## Troubleshooting
 There are a few helpful commands you can run on your pi to troubleshoot:</br>
 `sudo systemctl status send-ip.service` - tells you the status of the service. It should say 'active' if working.</br>
-`sudo journalctl -u send-ip.service' - logging information for the service. Check here to see any possible errors that occurred when the service attempted to run.
+`sudo journalctl -u send-ip.service` - logging information for the service. Check here to see any possible errors that occurred when the service attempted to run.
 
 ## Extra info
 Here is some more information about the different fields in the `send-ip.service` file:</br>
