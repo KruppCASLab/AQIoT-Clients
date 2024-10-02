@@ -1,0 +1,12 @@
+[Unit]
+Description=Send IP address of pi to CASLabs page on reboot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=#full/path/to/send_ip.sh <your label>
+Type=oneshot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
