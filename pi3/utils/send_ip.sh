@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # make sure that IP address has been grabbed
-while ! ip link show wlan0 &>/dev/null; do
+while ! curl -s https://api.ipify.org &>/dev/null; do
 	sleep 1
 done
 
@@ -18,7 +18,7 @@ fi
 label="$1"
 
 # get current IP address
-ip=$(ip addr show wlan0 | awk '/inet / {print $2}' | cut -d / -f1)
+ip=$(curl -s https://api.ipify.org)
 
 # send address to CASlab server
 curl -k -X POST -H "Content-Type: application/json" \
