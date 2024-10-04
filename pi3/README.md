@@ -40,7 +40,7 @@
 
 ## 5. Connect to an SSH server
 
-### Terminal
+### Local
 
 Open a terminal window on your computer and enter the following command, replacing the `<ip address>` placeholder with the [IP address of the Raspberry Pi you’re trying to connect to](https://www.raspberrypi.com/documentation/computers/remote-access.html#ip-address) and `<username>` with your username:
 
@@ -74,20 +74,20 @@ You are now connected to the Raspberry Pi remotely, and can execute commands.
 
 1. Click `Session` tab and navigate to `SSH` tab to create a SSH session.
 2. Enter the hostname/IP address of your Raspberry Pi and your username.
-   <img src="https://raw.githubusercontent.com/Aphcity/aphcity-assets/master/20240930/105214.5fe0e8.png" style="width: 800px;" />
+   <img src="https://cdn.statically.io/gh/Aphcity/aphcity-assets/master/20240930/105214.5fe0e8.png" style="width: 800px;" />
 3. Click `OK` and connect to the SSH terminal by entering your password.
-   <img src="https://raw.githubusercontent.com/Aphcity/aphcity-assets/master/20240930/105534.929d48.png" style="width: 800px;" />
-4. Click `Yes` to save password for future logging in.
-   <img src="https://raw.githubusercontent.com/Aphcity/aphcity-assets/master/20240930/110021.b302bd.png" />
+   <img src="https://cdn.statically.io/gh/Aphcity/aphcity-assets/master/20240930/105534.929d48.png" style="width: 800px;" />
+4. Click `Yes` to save password for future one-click logging in.
+   <img src="https://cdn.statically.io/gh/Aphcity/aphcity-assets/master/20240930/110021.b302bd.png" />
 5. All set, your SSH terminal should be like
-   <img src="C:\Users\chalk\AppData\Roaming\Typora\typora-user-images\image-20240930110132089.png" alt="image-20240930110132089" />
+   <img src="https://cdn.statically.io/gh/Aphcity/aphcity-assets/master/20241004/113911.1d33fa.png" />
 
 > You can activate X11 Forward by using commands like `geany &` that supports X11 forwarding.
 >
-> <img src="https://raw.githubusercontent.com/Aphcity/aphcity-assets/master/20240930/110430.6d5299.png" />
-
+> <img src="https://cdn.statically.io/gh/Aphcity/aphcity-assets/master/20240930/110430.6d5299.png" />
 
 ## 6. Set up client code for PM25 sensor
+
 - https://learn.adafruit.com/pm25-air-quality-sensor/python-and-circuitpython
 
 - Follow the Tutorial from this Link and make sure you use `raspi-config` to enable serial communication which is listed in interfaces. reboot the pi after so it can be enabled.
@@ -122,3 +122,23 @@ pm25 = PM25_UART(uart, reset_pin)
 - If successful you get some readings from the sensor detecting the air quality.
 - If not then check again if you followed the steps and if not it could be an issue with the sensor hardware not being configured correct and notify admins.
 
+## 7. Set up IP report service
+
+The [send_ip.sh](./utils/send-ip.sh) file is a bash script that sends the current IP address of your pi to [Team page on CASLAB](https://caslab.case.edu/team/) using [ipify-api](https://github.com/rdegges/ipify-api) when you reboot/power on your pi. It requires one command line argument: a label which represents the owner of the pi.
+
+The `send-ip.service` file is a systemd service file that runs the script on the pi on reboot.
+
+Replace the comments with the correct information in [send-ip.txt](./utils/send-ip.txt). Remember to include a label argument!
+
+Copy `send-ip.txt` to the `/etc/systemd/system/` directory AND CHANGE IT TO `send-ip.service`
+
+``` bash
+sudo cp ./pi3/utils/send-ip.txt /etc/systemd/system/send-ip.service
+```
+
+After you have finished the previous steps and saved your changes, run following command to enable the service. Now, the script should be fully working! You can test by running `sudo reboot` and visiting [Team page on CASLAB](https://caslab.case.edu/team/) after. Your pi's IP address should appear with the label that you used in the service folder.
+
+``` bash
+sudo systemctl enable send-ip.service
+sudo systemctl start send-ip.service
+```
