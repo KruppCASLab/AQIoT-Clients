@@ -18,7 +18,11 @@ fi
 label="$1"
 
 # get current IP address
-ip=$(curl -s https://api.ipify.org)
+# manually test with: 
+# IPV4: echo $(curl -s https://api.ipify.org)
+# IPV6: echo $(curl -s https://api6.ipify.org)
+# IPV4/6: echo $(curl -s https://api64.ipify.org)
+ip=$(curl -s https://api64.ipify.org)
 
 # send address to CASlab server
 curl -k -X POST -H "Content-Type: application/json" \
