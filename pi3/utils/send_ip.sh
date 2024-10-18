@@ -1,11 +1,16 @@
 #!/bin/bash
 
 # make sure that IP address has been grabbed
-while ! curl -s https://api.ipify.org &>/dev/null; do
-	sleep 1
+while true; do
+    ip=$(curl -s https://api64.ipify.org)
+    if [ -n "$ip" ]; then
+        echo "Successfully got IP: $ip"
+        break
+    else
+        echo "Failed to get IP, retrying..."
+        sleep 1
+    fi
 done
-
-echo "Successfully got IP"
 
 # check number of args
 if [ "$#" -ne 1 ]; then
@@ -22,7 +27,7 @@ label="$1"
 # IPV4: echo $(curl -s https://api.ipify.org)
 # IPV6: echo $(curl -s https://api6.ipify.org)
 # IPV4/6: echo $(curl -s https://api64.ipify.org)
-ip=$(curl -s https://api64.ipify.org)
+#ip=$(curl -s https://api64.ipify.org)
 
 # send address to CASlab server
 curl -k -X POST -H "Content-Type: application/json" \
