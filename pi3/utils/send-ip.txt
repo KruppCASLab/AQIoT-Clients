@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=#full/path/to/send_ip.sh <your label>
+ExecStart=#full/path/to/send_ip.sh esteban
 Type=oneshot
 RemainAfterExit=yes
 
