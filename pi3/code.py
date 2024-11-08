@@ -19,6 +19,7 @@ logging.basicConfig(
 
 
 class LogType(str, Enum):
+    DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
@@ -42,13 +43,15 @@ class Config:
 
 
 def get_pm_data():
+    print("Entering get_pm_data function")
+    logging.debug("Entering get_pm_data function")
     # Setup PM sensor
     # Note: This was added within the  function to solve issue where stale readings occur
     uart = serial.Serial("/dev/ttyS0", baudrate=9600, timeout=0.25)
     pm25 = PM25_UART(uart, None)
 
-    print("Read PM data")
-    logging.info("Reading PM data")
+    print("Reading PM data")
+    logging.debug("Reading PM data")
     reading_count = 0
 
     while True:
@@ -56,7 +59,7 @@ def get_pm_data():
 
         try:
             aqdata = pm25.read()
-        except RuntimeError:
+        except RuntimeError as error:
             reading_count += 1
             print("Unable to read from PM sensor, retrying...")
             logging.warning("not reading sensor data")
@@ -64,11 +67,15 @@ def get_pm_data():
                 post_log(LogType.WARNING, LogCode.SENSOR_PM25_READ_FAIL, "Excessive PM read failure, > 100")
                 logging.error("Excessive PM25 Sensor fail")
                 # break #possibly needed here 
+                break
             continue
+        print("Data read successfully")
+        logging.info("Get get_pm_data: %s", aqdata)
         return aqdata
 
 
 def dump_sensor_data(aqdata):
+    logging.info("Entering dump_sensor_data function with data: %s", aqdata)
     now = datetime.datetime.now()
     # print stmt can be adjusted here and removed here for new formated one 
     print("%s\tPM 1.0: %d\tPM2.5: %d\tPM10: %d" % (
@@ -76,13 +83,16 @@ def dump_sensor_data(aqdata):
     info_msg = f"{now.strftime('%Y-%m-%d %H:%M:%S')}, PM 1.0: {aqdata['pm10 env']}, PM 2.5 {aqdata['pm25 env']}, PM 10: {aqdata['pm100 env']}"
     print(info_msg)
     logging.info(info_msg)
+    logging.debug("Exiting dump_sensor_data function")
 
 
 def build_url():
+    logging.debug("Building URL")
     return config.base_url + str(config.client_id) + "/"
 
 
 def post_log(log_type: LogType, code: LogCode, message: str):
+    logging.debug("Entering post_log function with type: %s, code: %s, message: %s", log_type, code, message)
     url = build_url() + "log"
     json_data = {
         "type": log_type,
@@ -91,20 +101,24 @@ def post_log(log_type: LogType, code: LogCode, message: str):
     }
     logging.info("sending json data")
     send_request(json_data, url)
+    logging.debug("Exiting post_log function")
 
 
 def post_data(aqdata):
+    logging.debug("Entering post_data function with data: %s", aqdata)
     url = build_url() + "data"
     json_data = {
         "pm25": aqdata["pm25 env"],
         "pm10": aqdata["pm10 env"],
         "pm100": aqdata["pm100 env"]
     }
-    logging.info("sensor data is being posted to web service")
+    logging.info("Sensor data is being posted to web service")
     send_request(json_data, url)
+    logging.debug("Exiting post_data function")
 
 
 def send_request(json_data, url):
+    logging.debug("Entering send_request function with URL: %s and data: %s", url, json_data)
     try:
         headers = {
             "Content-Type": "application/json",
@@ -118,10 +132,11 @@ def send_request(json_data, url):
             logging.info(info_msg)     
         else:
             print("Response from server: ", r.status_code, r.text)
-    except Exception as e:
+    except Exception as error:
         print("Unable to send data to server")
-        logging.debug("Unable to send data to server")
-        print(e)
+        logging.error("Unable to send data to server")
+        print(error)
+    logging.debug("Exiting send_request function")
 
 
 def update_config():
@@ -132,24 +147,32 @@ def update_config():
     source_interval = source_config["interval"]
 
     # Update config parameters and write new config
-    if source_base_url != config.base_url or source_interval != config.interval:
-        print("Updating Config")
-        logging.info("Config being updated here")
-        config.base_url = source_base_url
-        config.interval = source_interval
-        with open("config.json", "w") as fd:
-            json.dump(vars(config), fd, indent=4)
+    try:
+        if source_base_url != config.base_url or source_interval != config.interval:
+            print("Updating Config")
+            logging.info("Config being updated here")
+            config.base_url = source_base_url
+            config.interval = source_interval
+            with open("config.json", "w") as fd:
+                json.dump(vars(config), fd, indent=4)
+    except Exception as error:
+        logging.error("Error updating config")
+    logging.debug("Exiting update_config function")
 
 
 # Main Operation
-with open("config.json") as fd:
-    config_data = json.load(fd)
-    config = Config(config_data["wifi_ssid"],
-                    config_data["wifi_pass"],
-                    config_data["base_url"],
-                    config_data["client_id"],
-                    config_data["client_key"],
-                    config_data["interval"])
+try:
+    with open("config.json") as fd:
+        config_data = json.load(fd)
+        config = Config(config_data["wifi_ssid"],
+                        config_data["wifi_pass"],
+                        config_data["base_url"],
+                        config_data["client_id"],
+                        config_data["client_key"],
+                        config_data["interval"])
+except Exception as error:
+    logging.error("Unable to load config")
+    sys.exit(1)
 
 if config is None:
     print("Unable to load config")
@@ -157,6 +180,7 @@ if config is None:
     sys.exit(1)
 
 print(config.__dict__)
+logging.info("Config loaded: %s", config.__dict__)
 
 # Normal Operation
 print("Starting AQIoT Service")
