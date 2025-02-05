@@ -27,8 +27,8 @@ class LogType(str, Enum):
 
 
 class LogCode(int, Enum):
-    WIFI_CONNECT_SUCCESS = 30
-    WIFI_CONNECT_FAILED = 4
+    # WIFI_CONNECT_SUCCESS = 30
+    # WIFI_CONNECT_FAILED = 4
     SENSOR_PM25_READ_FAIL = 14
     DEVICE_POWER_ON = 31
 
@@ -71,9 +71,9 @@ def get_pm_data():
 def dump_sensor_data(aqdata):
     now = datetime.datetime.now()
     # print stmt can be adjusted here and removed here for new formated one 
-    print("%s\tPM 1.0: %d\tPM2.5: %d\tPM10: %d" % (
-    now.strftime('%Y-%m-%d %H:%M:%S'), aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"]))
-    info_msg = f"{now.strftime('%Y-%m-%d %H:%M:%S')}, PM 1.0: {aqdata['pm10 env']}, PM 2.5 {aqdata['pm25 env']}, PM 10: {aqdata['pm100 env']}"
+    # print("%s\tPM 1.0: %d\tPM2.5: %d\tPM10: %d" % (
+    # now.strftime('%Y-%m-%d %H:%M:%S'), aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"]))
+    info_msg = f"{now.strftime('%Y-%m-%d %H:%M:%S')}, PM 1.0: {aqdata['pm10 env']}, PM 2.5: {aqdata['pm25 env']}, PM 10: {aqdata['pm100 env']}"
     print(info_msg)
     logging.info(info_msg)
 
@@ -84,8 +84,7 @@ def build_url():
 
 
 def post_log(log_type: LogType, code: LogCode, message: str):
-    url = build_url() + "loggings"
-    url = config.base_url
+    url = build_url() + "logs"
     json_data = {
         "type": log_type,
         "code": code,
@@ -165,7 +164,7 @@ print("Starting AQIoT Service")
 logging.info("Starting AQIoT Service")
 elapsed_sec = 0
 # TODO: Logging Service Not Implemented yet
-# post_log(LogType.INFO, LogCode.DEVICE_POWER_ON, "Starting Up")
+post_log(LogType.INFO, LogCode.DEVICE_POWER_ON, "Starting Up")
 while True:
     # update_config()
     aqdata = get_pm_data()
