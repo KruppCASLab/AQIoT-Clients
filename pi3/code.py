@@ -78,13 +78,8 @@ def dump_sensor_data(aqdata):
     logging.info(info_msg)
 
 
-def build_url():
-    # return config.base_url + str(config.client_id) + "/"
-    return config.base_url + "/"
-
-
 def post_log(log_type: LogType, code: LogCode, message: str):
-    url = build_url() + "logs"
+    url = config.base_url + "logs"
     json_data = {
         "type": log_type,
         "code": code,
@@ -95,7 +90,7 @@ def post_log(log_type: LogType, code: LogCode, message: str):
 
 
 def post_data(aqdata):
-    url = build_url() + "readings"
+    url = config.base_url + "readings"
     json_data = {
         "pm25": aqdata["pm25 env"],
         "pm10": aqdata["pm10 env"],
@@ -107,21 +102,27 @@ def post_data(aqdata):
 
 def send_request(json_data, url):
     try:
-        headers = {
-            "Content-Type": "application/json",
-            # "x-api-key": config.client_key
-        }
+        # headers = {
+        #     "Content-Type": "application/json",
+        #     "User-Agent": "AQIoT/1.0 RaspiOSLite RPi3B+ Debian GNU/Linux aarch64"
+        # }
 
-        r = requests.post(url, json=json_data, headers=headers, auth=HTTPBasicAuth(config.user_token, config.auth_token))
-        if int(r.status_code) != 200:
-            info_msg = f"Response from server: {r.status_code}, {r.text}"
-            print("Response from server: ", r.status_code, r.text)
-            logging.info(info_msg)     
+        # response = requests.post(url, json=json_data, headers=headers, auth=HTTPBasicAuth(config.user_token, config.auth_token))
+        response = requests.post(url, json=json_data, auth=HTTPBasicAuth(config.user_token, config.auth_token))
+        info_msg = f"Response from {response.url}: {response.status_code} {response.reason} {response.text}"
+        # print(response.status_code)
+        # TODO: figure out why response.reason is not printing
+        # FIXME: the web service is not returning a reason, it comes from the spring security response
+        # print(response.reason)
+        if int(response.status_code) == 201 or int(response.status_code) == 200:
+            logging.info(info_msg)
         else:
-            print("Response from server: ", r.status_code, r.text)
+            logging.error(info_msg)
+        print(info_msg)
+
     except Exception as e:
-        print("Unable to send data to server")
-        logging.debug("Unable to send data to server")
+        print("Unable to send data to " + url)
+        logging.debug("Unable to send data to " + url)
         print(e)
 
 
