@@ -1,0 +1,5 @@
+auto eth0.1024
+iface eth0.1024 inet static
+address 192.168.0.200
+netmask 255.255.255.0
+vlan-raw-device eth0

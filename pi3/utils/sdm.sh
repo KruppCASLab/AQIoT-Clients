@@ -62,14 +62,15 @@ user:adduser=$username|password=$password
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#apps
 # apps:remove=python3|apps=pypy3-dev
 # apps:apps=python3.11-dev
-apps:apps=pypy3-dev
+apps:apps=pypy3-dev,vlan
 
 # Copy files to Pi
-# 
+# https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#copyfile
 copyfile:"from=../code.py|to=/home/$username/AQIoT/|mkdirif=yes"
 copyfile:"from=../config.json|to=/home/$username/AQIoT/|mkdirif=yes"
 copyfile:"from=../requirements.txt|to=/home/$username/AQIoT/|mkdirif=yes"
 copyfile:"from=../.bashrc|to=/home/$username/"
+copyfile:"from=./interfaces|to=/etc/network/|mkdirif=yes"
 
 # Configure network ** change 'myssid' and 'mywifipassword' **
 # https://github.com/gitbls/sdm/blob/master/Docs/Plugins.md#network
@@ -160,4 +161,72 @@ fi
 EOF
     ) | bash -c "cat >|$assets/build/python-setup"
 
-sudo sdm --hostname $hostname --customize --plugin @$assets/build/my.plugins --cscript $assets/build/python-setup --restart build/raspios_lite_arm64_latest.img  --extend --xmb 512
+## ================================================
+## Setup VLan Environment in Post-Install
+## ================================================
+
+(cat <<EOF
+#!/bin/bash
+#
+# Sample sdm Custom Phase script
+#
+function loadparams() {
+    source \$SDMPT/etc/sdm/sdm-readparams
+}
+# \$1 is the phase: "0", "1", or "post-install"
+
+#
+# Main code for the script
+#
+phase=\$1
+pfx="\$(basename \$0)"     #For messages
+loadparams
+
+if [ \$phase == "0" ]
+then
+    #
+    # In Phase 0 all references to directories in the image must be preceded by \$SDMPT
+    #
+    logtoboth "* \$pfx Phase 0"
+
+# INSERT Your Custom Phase 0 code here
+    
+    logtoboth "* \$pfx Phase 0 Completed"
+
+elif [ "\$phase" == "1" ]
+then
+    #
+    # Phase 1 (in nspawn)
+    #
+    logtoboth "* \$pfx Phase 1"
+    logfreespace "at start of \$pfx Phase 1"
+    #
+    # INSERT your Custom Phase 1 customization stuff here
+    # In Phase 1 all references to directories in the image can be direct
+    #
+    logfreespace "at end of \$pfx Phase 1"
+    logtoboth "* \$pfx Phase 1 Completed"
+else
+    #
+    # Post-install edits
+    #
+    logtoboth "* \$pfx Custom Phase post-install"
+    logfreespace "at start of \$pfx Custom Phase post-install"
+    #
+    # INSERT Your Custom Phase post-install code here
+    # In Phase post-install all references to directories in the image can be direct
+    #
+
+    sudo modprobe 8021q
+    sudo ip link add link eth0 name eth0.1024 type vlan id 1024
+    sudo ip addr add 192.168.0.200/24 dev eth0.1024
+    sudo ip link set up eth0.1024
+    sudo su -c 'echo "8021q" >> /etc/modules'
+
+    logfreespace "at end of \$pfx Custom Phase post-install"
+    logtoboth "* \$pfx Custom Phase post-install Completed"
+fi
+EOF
+    ) | bash -c "cat >|$assets/build/vlan-setup"
+
+sudo sdm --hostname $hostname --customize --plugin @$assets/build/my.plugins --cscript $assets/build/python-setup --cscript $assets/build/vlan-setup --restart build/raspios_lite_arm64_latest.img  --extend --xmb 512
