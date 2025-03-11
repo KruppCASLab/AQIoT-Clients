@@ -1,8 +1,6 @@
 {
-    "wifi_ssid": "",
-    "wifi_pass": "",
-    "base_url": "https://mopsdev.bw.edu/aqiot/api/sensor/",
-    "client_id": 3,
-    "client_key": "",
-    "interval": 60
+  "base_url": "https://caslab.case.edu/services/air/",
+  "user_token": "USER_TOKEN",
+  "auth_token": "AUTH_TOKEN",
+  "interval": 60
 }

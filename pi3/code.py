@@ -9,6 +9,8 @@ import sys
 from adafruit_pm25.uart import PM25_UART
 from enum import Enum
 import logging
+from requests.auth import HTTPBasicAuth
+
 
 # set up logging configs for logging to log file messages
 logging.basicConfig(
@@ -25,19 +27,17 @@ class LogType(str, Enum):
 
 
 class LogCode(int, Enum):
-    WIFI_CONNECT_SUCCESS = 30
-    WIFI_CONNECT_FAILED = 4
+    # WIFI_CONNECT_SUCCESS = 30
+    # WIFI_CONNECT_FAILED = 4
     SENSOR_PM25_READ_FAIL = 14
     DEVICE_POWER_ON = 31
 
 
 class Config:
-    def __init__(self, wifi_ssid, wifi_pass, base_url, client_id, client_key, interval):
-        self.wifi_ssid = wifi_ssid
-        self.wifi_pass = wifi_pass
+    def __init__(self, base_url, user_token, auth_token, interval):
         self.base_url = base_url
-        self.client_id = client_id
-        self.client_key = client_key
+        self.user_token = user_token
+        self.auth_token = auth_token
         self.interval = interval
 
 
@@ -71,19 +71,15 @@ def get_pm_data():
 def dump_sensor_data(aqdata):
     now = datetime.datetime.now()
     # print stmt can be adjusted here and removed here for new formated one 
-    print("%s\tPM 1.0: %d\tPM2.5: %d\tPM10: %d" % (
-    now.strftime('%Y-%m-%d %H:%M:%S'), aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"]))
-    info_msg = f"{now.strftime('%Y-%m-%d %H:%M:%S')}, PM 1.0: {aqdata['pm10 env']}, PM 2.5 {aqdata['pm25 env']}, PM 10: {aqdata['pm100 env']}"
+    # print("%s\tPM 1.0: %d\tPM2.5: %d\tPM10: %d" % (
+    # now.strftime('%Y-%m-%d %H:%M:%S'), aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"]))
+    info_msg = f"{now.strftime('%Y-%m-%d %H:%M:%S')}, PM 1.0: {aqdata['pm10 env']}, PM 2.5: {aqdata['pm25 env']}, PM 10: {aqdata['pm100 env']}"
     print(info_msg)
     logging.info(info_msg)
 
 
-def build_url():
-    return config.base_url + str(config.client_id) + "/"
-
-
 def post_log(log_type: LogType, code: LogCode, message: str):
-    url = build_url() + "log"
+    url = config.base_url + "logs"
     json_data = {
         "type": log_type,
         "code": code,
@@ -94,7 +90,7 @@ def post_log(log_type: LogType, code: LogCode, message: str):
 
 
 def post_data(aqdata):
-    url = build_url() + "data"
+    url = config.base_url + "readings"
     json_data = {
         "pm25": aqdata["pm25 env"],
         "pm10": aqdata["pm10 env"],
@@ -106,50 +102,56 @@ def post_data(aqdata):
 
 def send_request(json_data, url):
     try:
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": config.client_key
-        }
+        # headers = {
+        #     "Content-Type": "application/json",
+        #     "User-Agent": "AQIoT/1.0 RaspiOSLite RPi3B+ Debian GNU/Linux aarch64"
+        # }
 
-        r = requests.post(url, json=json_data, headers=headers)
-        if int(r.status_code) != 200:
-            info_msg = f"Response from server: {r.status_code}, {r.text}"
-            print("Response from server: ", r.status_code, r.text)
-            logging.info(info_msg)     
+        # response = requests.post(url, json=json_data, headers=headers, auth=HTTPBasicAuth(config.user_token, config.auth_token))
+        response = requests.post(url, json=json_data, auth=HTTPBasicAuth(config.user_token, config.auth_token))
+        info_msg = f"Response from {response.url}: {response.status_code} {response.reason} {response.text}"
+        # print(response.status_code)
+        # TODO: figure out why response.reason is not printing
+        # FIXME: the web service is not returning a reason, it comes from the spring security response
+        # print(response.reason)
+        if int(response.status_code) == 201 or int(response.status_code) == 200:
+            logging.info(info_msg)
         else:
-            print("Response from server: ", r.status_code, r.text)
+            logging.error(info_msg)
+        print(info_msg)
+
     except Exception as e:
-        print("Unable to send data to server")
-        logging.debug("Unable to send data to server")
+        print("Unable to send data to " + url)
+        logging.debug("Unable to send data to " + url)
         print(e)
 
 
-def update_config():
-    # Check for new config
-    response = requests.get("https://krupp.dev/aqiot/config.json")
-    source_config = response.json()
-    source_base_url = source_config["base_url"]
-    source_interval = source_config["interval"]
+# def update_config():
+#     # Check for new config
+#     response = requests.get("https://krupp.dev/aqiot/config.json")
+#     source_config = response.json()
+#     source_base_url = source_config["base_url"]
+#     source_interval = source_config["interval"]
 
-    # Update config parameters and write new config
-    if source_base_url != config.base_url or source_interval != config.interval:
-        print("Updating Config")
-        logging.info("Config being updated here")
-        config.base_url = source_base_url
-        config.interval = source_interval
-        with open("config.json", "w") as fd:
-            json.dump(vars(config), fd, indent=4)
+#     # Update config parameters and write new config
+#     if source_base_url != config.base_url or source_interval != config.interval:
+#         print("Updating Config")
+#         logging.info("Config being updated here")
+#         config.base_url = source_base_url
+#         config.interval = source_interval
+#         with open("config.json", "w") as fd:
+#             json.dump(vars(config), fd, indent=4)
 
 
 # Main Operation
 with open("config.json") as fd:
     config_data = json.load(fd)
-    config = Config(config_data["wifi_ssid"],
-                    config_data["wifi_pass"],
+    config = Config(
                     config_data["base_url"],
-                    config_data["client_id"],
-                    config_data["client_key"],
-                    config_data["interval"])
+                    config_data["user_token"],
+                    config_data["auth_token"],
+                    config_data["interval"]
+                    )
 
 if config is None:
     print("Unable to load config")
@@ -162,9 +164,10 @@ print(config.__dict__)
 print("Starting AQIoT Service")
 logging.info("Starting AQIoT Service")
 elapsed_sec = 0
+# TODO: Logging Service Not Implemented yet
 post_log(LogType.INFO, LogCode.DEVICE_POWER_ON, "Starting Up")
 while True:
-    update_config()
+    # update_config()
     aqdata = get_pm_data()
     dump_sensor_data(aqdata)
     post_data(aqdata)
