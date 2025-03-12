@@ -14,7 +14,6 @@ from requests.auth import HTTPBasicAuth
 
 # set up logging configs for logging to log file messages
 logging.basicConfig(
-    filename='aqiot_service.log',
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
