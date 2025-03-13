@@ -8,6 +8,7 @@ WorkingDirectory=/home/aqiot/aqiot
 StandardOutput=inherit
 StandardError=inherit
 Restart=always
+RestartSec=60
 User=aqiot
 
 [Install]
