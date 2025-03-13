@@ -1,23 +1,46 @@
-import requests
-import json
-import datetime
+import time
+import board
+import busio
+import serial
+from digitalio import DigitalInOut, Direction, Pull
 
+reset_pin = None
+uart = serial.Serial("/dev/ttyS0", baudrate=9600, timeout=0.25)
 
-# testing to create some sensor data 
-date = datetime.now()
+# Connect to a PM2.5 sensor over UART
+from adafruit_pm25.uart import PM25_UART
+pm25 = PM25_UART(uart, reset_pin)
 
-sensor_data = {
-    "sensor_id": 1,
-    "sensor_date": int(date.strftime('%Y%m%d')),
-    "type": "AQ_IOT",
-    "description": "AQ sensor",
-    "userToken": "user-1234",
-    "authToken": "auth-5678"
-}
+print("Found PM2.5 sensor, reading data...")
 
-x = requests.post('http://localhost:8080/sensor', json=json.dumps(sensor_data))
+while True:
+    time.sleep(1)
 
-if x.status_code == 201:
-    print("sensor created successfully")
-else:
-    print("failed to create sensor")
+    try:
+        aqdata = pm25.read()
+        # print(aqdata)
+    except RuntimeError:
+        print("Unable to read from sensor, retrying...")
+        continue
+
+    print()
+    print("Concentration Units (standard)")
+    print("---------------------------------------")
+    print(
+        "PM 1.0: %d\tPM2.5: %d\tPM10: %d"
+        % (aqdata["pm10 standard"], aqdata["pm25 standard"], aqdata["pm100 standard"])
+    )
+    print("Concentration Units (environmental)")
+    print("---------------------------------------")
+    print(
+        "PM 1.0: %d\tPM2.5: %d\tPM10: %d"
+        % (aqdata["pm10 env"], aqdata["pm25 env"], aqdata["pm100 env"])
+    )
+    print("---------------------------------------")
+    print("Particles > 0.3um / 0.1L air:", aqdata["particles 03um"])
+    print("Particles > 0.5um / 0.1L air:", aqdata["particles 05um"])
+    print("Particles > 1.0um / 0.1L air:", aqdata["particles 10um"])
+    print("Particles > 2.5um / 0.1L air:", aqdata["particles 25um"])
+    print("Particles > 5.0um / 0.1L air:", aqdata["particles 50um"])
+    print("Particles > 10 um / 0.1L air:", aqdata["particles 100um"])
+    print("---------------------------------------")
