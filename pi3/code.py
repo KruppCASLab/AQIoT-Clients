@@ -14,7 +14,6 @@ from requests.auth import HTTPBasicAuth
 
 # set up logging configs for logging to log file messages
 logging.basicConfig(
-    filename='aqiot_service.log',
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
@@ -126,21 +125,20 @@ def send_request(json_data, url):
         print(e)
 
 
-# def update_config():
-#     # Check for new config
-#     response = requests.get("https://krupp.dev/aqiot/config.json")
-#     source_config = response.json()
-#     source_base_url = source_config["base_url"]
-#     source_interval = source_config["interval"]
+def update_config():
+    # Check for new config
+    response = requests.get("https://krupp.dev/aqiot/config.json")
+    source_config = response.json()
+    source_base_url = source_config["base_url"]
+    source_interval = source_config["interval"]
 
-#     # Update config parameters and write new config
-#     if source_base_url != config.base_url or source_interval != config.interval:
-#         print("Updating Config")
-#         logging.info("Config being updated here")
-#         config.base_url = source_base_url
-#         config.interval = source_interval
-#         with open("config.json", "w") as fd:
-#             json.dump(vars(config), fd, indent=4)
+    # Update config parameters and write new config
+    if source_base_url != config.base_url or source_interval != config.interval:
+        logging.info("Config being updated")
+        config.base_url = source_base_url
+        config.interval = source_interval
+        with open("config.json", "w") as fd:
+            json.dump(vars(config), fd, indent=4)
 
 
 # Main Operation
@@ -167,7 +165,7 @@ elapsed_sec = 0
 # TODO: Logging Service Not Implemented yet
 post_log(LogType.INFO, LogCode.DEVICE_POWER_ON, "Starting Up")
 while True:
-    # update_config()
+    update_config()
     aqdata = get_pm_data()
     dump_sensor_data(aqdata)
     post_data(aqdata)

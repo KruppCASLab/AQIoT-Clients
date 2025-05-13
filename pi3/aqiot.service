@@ -1,16 +1,14 @@
 [Unit]
-Description=AQIoT Service
+Description=AQIoT Sensor
 After=network.target
-StartLimitBurst=5
-StartLimitInterval=30
-FailureAction=reboot
 
 [Service]
-ExecStart=/usr/bin/python3 /home/aqiot/code.py
-WorkingDirectory=/home/aqiot
+ExecStart=/home/aqiot/aqiot/run.sh
+WorkingDirectory=/home/aqiot/aqiot
 StandardOutput=inherit
 StandardError=inherit
-Restart=on-failure
+Restart=always
+RestartSec=60
 User=aqiot
 
 [Install]
